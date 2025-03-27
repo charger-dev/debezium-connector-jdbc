@@ -87,14 +87,14 @@ import io.debezium.util.Strings;
  */
 public class GeneralDatabaseDialect implements DatabaseDialect {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(GeneralDatabaseDialect.class);
+    protected static final Logger LOGGER = LoggerFactory.getLogger(GeneralDatabaseDialect.class);
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC);
 
     private final JdbcSinkConnectorConfig connectorConfig;
-    private final Dialect dialect;
-    private final DdlTypeRegistry ddlTypeRegistry;
+    protected final Dialect dialect;
+    protected final DdlTypeRegistry ddlTypeRegistry;
     private final IdentifierHelper identifierHelper;
-    private final ColumnNamingStrategy columnNamingStrategy;
+    protected final ColumnNamingStrategy columnNamingStrategy;
     private final Map<String, Type> typeRegistry = new HashMap<>();
     private final Map<String, String> typeCoercions = new HashMap<>();
     private final boolean jdbcTimeZone;

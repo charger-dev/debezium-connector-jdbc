@@ -31,12 +31,8 @@ public class DefaultTableNamingStrategy implements TableNamingStrategy {
 
     @Override
     public String resolveTableName(JdbcSinkConnectorConfig config, SinkRecord record) {
-        // Default behavior is to replace dots with underscores
-        final String topicName = record.topic().replace(".", "_");
-        String table = config.getTableNameFormat().replace("${topic}", topicName);
-
-        table = resolveTableNameBySource(config, record, table);
-        return table;
+        final String[] topicParts = record.topic().split("\\.");
+        return topicParts[topicParts.length - 1].toUpperCase();
     }
 
     private String resolveTableNameBySource(JdbcSinkConnectorConfig config, SinkRecord record, String tableFormat) {

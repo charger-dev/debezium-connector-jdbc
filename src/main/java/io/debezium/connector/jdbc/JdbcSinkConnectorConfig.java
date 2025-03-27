@@ -656,6 +656,8 @@ public class JdbcSinkConnectorConfig {
         hibernateConfig.setProperty(AvailableSettings.C3P0_ACQUIRE_INCREMENT, config.getString(CONNECTION_POOL_ACQUIRE_INCREMENT_FIELD));
         hibernateConfig.setProperty(AvailableSettings.GLOBALLY_QUOTED_IDENTIFIERS, Boolean.toString(config.getBoolean(QUOTE_IDENTIFIERS_FIELD)));
         hibernateConfig.setProperty(AvailableSettings.JDBC_TIME_ZONE, getDatabaseTimeZone());
+        hibernateConfig.setProperty(AvailableSettings.DRIVER, "net.snowflake.client.jdbc.SnowflakeDriver");
+        hibernateConfig.setProperty("hibernate.dialect", "net.snowflake.hibernate.dialect.SnowflakeDialect");
 
         if (LOGGER.isDebugEnabled()) {
             hibernateConfig.setProperty(AvailableSettings.SHOW_SQL, Boolean.toString(true));

@@ -10,7 +10,6 @@ import org.apache.kafka.connect.data.Schema;
 import io.debezium.connector.jdbc.dialect.DatabaseDialect;
 import io.debezium.connector.jdbc.type.AbstractType;
 import io.debezium.connector.jdbc.type.Type;
-import io.debezium.connector.jdbc.util.ByteArrayUtils;
 import io.debezium.data.Bits;
 
 /**
@@ -25,11 +24,6 @@ class BitType extends AbstractType {
     @Override
     public String[] getRegistrationKeys() {
         return new String[]{ Bits.LOGICAL_NAME };
-    }
-
-    @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        return String.format(dialect.getByteArrayFormat(), ByteArrayUtils.getByteArrayAsHex(value));
     }
 
     @Override

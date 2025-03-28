@@ -28,9 +28,4 @@ class BytesType extends AbstractBytesType {
         return "blob";
     }
 
-    @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        // Cannot bind default value to BLOB columns
-        return null;
-    }
 }

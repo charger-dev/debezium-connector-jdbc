@@ -39,27 +39,7 @@ public abstract class AbstractType implements Type {
 
     @Override
     public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        switch (schema.type()) {
-            case INT8:
-                return Byte.toString((byte) value);
-            case INT16:
-                return Short.toString((short) value);
-            case INT32:
-                return Integer.toString((int) value);
-            case INT64:
-                return Long.toString((long) value);
-            case FLOAT32:
-                return Float.toString((float) value);
-            case FLOAT64:
-                return Double.toString((double) value);
-            case STRING:
-                return "'" + value + "'";
-            case BOOLEAN:
-                return dialect.getFormattedBoolean((boolean) value);
-        }
-        throw new IllegalArgumentException(String.format(
-                "No default value resolution for schema type %s with name %s and type %s", schema.type(), schema.name(),
-                getClass().getName()));
+        return null;
     }
 
     @Override

@@ -49,12 +49,6 @@ class BitType extends AbstractType {
     }
 
     @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        // todo: add support for BIT/VARBIT/BIT VARYING(n) default values
-        return null;
-    }
-
-    @Override
     public String getTypeName(DatabaseDialect dialect, Schema schema, boolean key) {
         if (isBitOne(schema)) {
             return "bit";

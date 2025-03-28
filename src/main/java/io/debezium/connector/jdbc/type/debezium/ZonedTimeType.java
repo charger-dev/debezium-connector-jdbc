@@ -58,11 +58,6 @@ public class ZonedTimeType extends AbstractTimeType {
     }
 
     @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        return dialect.getFormattedTimeWithTimeZone((String) value);
-    }
-
-    @Override
     public List<ValueBindDescriptor> bind(int index, Schema schema, Object value) {
 
         if (value == null) {

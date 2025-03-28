@@ -47,10 +47,4 @@ class BytesType extends AbstractBytesType {
         }
         return dialect.getTypeName(Types.VARBINARY);
     }
-
-    @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        // No default values permitted
-        return null;
-    }
 }

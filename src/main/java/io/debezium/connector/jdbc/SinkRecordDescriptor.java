@@ -47,6 +47,7 @@ public class SinkRecordDescriptor {
     private final List<String> nonKeyFieldNames;
     private final Map<String, FieldDescriptor> fields;
     private final boolean flattened;
+    private static final Logger LOGGER = LoggerFactory.getLogger(SinkRecordDescriptor.class);
 
     private SinkRecordDescriptor(SinkRecord record, String topicName, List<String> keyFieldNames, List<String> nonKeyFieldNames,
                                  Map<String, FieldDescriptor> fields, boolean flattened) {
@@ -95,7 +96,23 @@ public class SinkRecordDescriptor {
 
     public boolean isDelete() {
         if (!isDebeziumSinkRecord()) {
-            return record.value() == null;
+            if (record.value() != null) {
+                final Struct value = (Struct) record.value();
+                Object deletedObj = value.get("__deleted");
+                boolean isDeleted = false;
+
+                if (deletedObj instanceof Boolean) {
+                    isDeleted = (Boolean) deletedObj;
+                }
+                else if (deletedObj instanceof String) {
+                    isDeleted = Boolean.parseBoolean((String) deletedObj);
+                }
+
+                return isDeleted;
+            }
+            else {
+                return true;
+            }
         }
         else if (record.value() != null) {
             final Struct value = (Struct) record.value();

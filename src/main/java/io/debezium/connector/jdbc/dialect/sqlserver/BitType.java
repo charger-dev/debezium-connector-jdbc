@@ -18,7 +18,6 @@ import io.debezium.connector.jdbc.dialect.DatabaseDialect;
 import io.debezium.connector.jdbc.relational.ColumnDescriptor;
 import io.debezium.connector.jdbc.type.AbstractType;
 import io.debezium.connector.jdbc.type.Type;
-import io.debezium.connector.jdbc.util.ByteArrayUtils;
 import io.debezium.data.Bits;
 
 /**
@@ -42,11 +41,6 @@ class BitType extends AbstractType {
             return String.format("cast(? as %s)", bitSize > 1 ? String.format("varbinary(%d)", bitSize) : "bit");
         }
         return "cast(? as varbinary)";
-    }
-
-    @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        return String.format(dialect.getByteArrayFormat(), ByteArrayUtils.getByteArrayAsHex(value));
     }
 
     @Override

@@ -147,12 +147,10 @@ public class RecordWriter {
             final SinkRecordDescriptor.FieldDescriptor field = record.getFields().get(fieldName);
 
             Object value;
-            if (field.getSchema().isOptional()) {
-                value = source.getWithoutDefault(fieldName);
-            }
-            else {
-                value = source.get(fieldName);
-            }
+            value = source.getWithoutDefault(fieldName);
+
+            LOGGER.debug("Binding field '{}' with value '{}' at index '{}'", fieldName, value, index);
+
             List<ValueBindDescriptor> boundValues = dialect.bindValue(field, index, value);
 
             boundValues.forEach(query::bind);

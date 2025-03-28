@@ -6,7 +6,6 @@
 package io.debezium.connector.jdbc.type.connect;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 
 import org.apache.kafka.connect.data.Date;
@@ -15,7 +14,6 @@ import org.apache.kafka.connect.data.Timestamp;
 import org.apache.kafka.connect.errors.ConnectException;
 
 import io.debezium.connector.jdbc.ValueBindDescriptor;
-import io.debezium.connector.jdbc.dialect.DatabaseDialect;
 import io.debezium.connector.jdbc.type.AbstractTimestampType;
 import io.debezium.connector.jdbc.type.Type;
 import io.debezium.connector.jdbc.util.DateTimeUtils;
@@ -32,11 +30,6 @@ public class ConnectTimestampType extends AbstractTimestampType {
     @Override
     public String[] getRegistrationKeys() {
         return new String[]{ Timestamp.LOGICAL_NAME };
-    }
-
-    @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        return dialect.getFormattedTimestamp(DateTimeUtils.toZonedDateTimeFromDate((java.util.Date) value, ZoneOffset.UTC));
     }
 
     @Override

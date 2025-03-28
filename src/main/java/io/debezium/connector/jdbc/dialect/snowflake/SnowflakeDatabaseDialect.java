@@ -13,16 +13,21 @@ import static org.hibernate.type.SqlTypes.TIMESTAMP;
 import static org.hibernate.type.SqlTypes.TIMESTAMP_WITH_TIMEZONE;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAccessor;
 import java.util.Optional;
+import java.util.Set;
 
 import org.apache.kafka.connect.data.Schema;
 import org.hibernate.SessionFactory;
 import org.hibernate.boot.model.naming.Identifier;
 import org.hibernate.dialect.Dialect;
 import org.hibernate.engine.jdbc.Size;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.debezium.connector.jdbc.JdbcSinkConnectorConfig;
 import io.debezium.connector.jdbc.SinkRecordDescriptor;
@@ -44,6 +49,8 @@ import net.snowflake.hibernate.dialect.SnowflakeDialect;
  * @author Chris Cranford
  */
 public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(SnowflakeDatabaseDialect.class);
 
     public static class SnowflakeDatabaseDialectProvider implements DatabaseDialectProvider {
         @Override
@@ -71,14 +78,77 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
         return 6;
     }
 
+    private String getDatabaseName() {
+        return getConfig().getConnectionDatabase().toUpperCase();
+    }
+
+    private String getSchemaName() {
+        return getConfig().getConnectionSchema().toUpperCase();
+    }
+
     @Override
     public boolean tableExists(Connection connection, TableId tableId) throws SQLException {
-        return super.tableExists(connection, tableId.toUpperCase());
+        tableId = tableId.toUpperCase();
+        final DatabaseMetaData metadata = connection.getMetaData();
+        try (ResultSet rs = metadata.getTables(getDatabaseName(), getSchemaName(), tableId.getTableName().toUpperCase(), null)) {
+            return rs.next();
+        }
     }
 
     @Override
     public TableDescriptor readTable(Connection connection, TableId tableId) throws SQLException {
-        return super.readTable(connection, tableId.toUpperCase());
+        tableId = tableId.toUpperCase();
+        final TableDescriptor.Builder table = TableDescriptor.builder();
+
+        final DatabaseMetaData metadata = connection.getMetaData();
+        try (ResultSet rs = metadata.getTables(getDatabaseName(), getSchemaName(), tableId.getTableName().toUpperCase(), null)) {
+            if (rs.next()) {
+                table.catalogName(rs.getString(1));
+                table.schemaName(rs.getString(2));
+                table.tableName(tableId.getTableName());
+
+                final String tableType = rs.getString(4);
+                table.type(Strings.isNullOrBlank(tableType) ? "TABLE" : tableType);
+            }
+            else {
+                throw new IllegalStateException("Failed to find table: " + tableId.toFullIdentiferString());
+            }
+        }
+
+        try (ResultSet rs = metadata.getColumns(getDatabaseName(), getSchemaName(), tableId.getTableName().toUpperCase(), null)) {
+            while (rs.next()) {
+                final String columnName = rs.getString(4);
+                final int jdbcType = rs.getInt(5);
+                final String typeName = rs.getString(6);
+                final int scale = rs.getInt(9);
+
+                final ColumnDescriptor column = ColumnDescriptor.builder()
+                        .columnName(columnName)
+                        .jdbcType(jdbcType)
+                        .typeName(typeName)
+                        .scale(scale)
+                        .build();
+
+                table.column(column);
+            }
+        }
+
+        return table.build();
+    }
+
+    @Override
+    public String getDeleteStatement(TableDescriptor table, SinkRecordDescriptor record) {
+        final SqlStatementBuilder builder = new SqlStatementBuilder();
+        builder.append("DELETE FROM ");
+        builder.append(getQualifiedTableName(table.getId().toUpperCase()));
+
+        if (!record.getKeyFieldNames().isEmpty()) {
+            builder.append(" WHERE ");
+            builder.appendList(" AND ", record.getKeyFieldNames(), (name) -> columnNameEqualsBinding(name, table, record));
+        }
+
+        LOGGER.debug("Generated delete statement: {}", builder.build());
+        return builder.build();
     }
 
     @Override
@@ -128,7 +198,7 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
         builder.append(getQualifiedTableName(table.getId()));
         builder.append(" AS target USING (SELECT ");
 
-        builder.appendLists(",", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
+        builder.appendLists(", ", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
                 name -> columnQueryBindingFromField(name, table, record) + " AS " + columnNameFromField(name, record));
 
         builder.append(") AS source ON ");
@@ -136,18 +206,20 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
                 name -> "target." + columnNameFromField(name, record) + " = source." + columnNameFromField(name, record));
 
         builder.append(" WHEN MATCHED THEN UPDATE SET ");
-        builder.appendList(",", record.getNonKeyFieldNames(),
+        builder.appendList(", ", record.getNonKeyFieldNames(),
                 name -> "target." + columnNameFromField(name, record) + " = source." + columnNameFromField(name, record));
 
         builder.append(" WHEN NOT MATCHED THEN INSERT (");
-        builder.appendLists(",", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
+        builder.appendLists(", ", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
                 name -> columnNameFromField(name, record));
         builder.append(") VALUES (");
-        builder.appendLists(",", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
+        builder.appendLists(", ", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
                 name -> "source." + columnNameFromField(name, record));
-        builder.append(")");
+        builder.append(");");
 
-        return builder.build();
+        String sql = builder.build();
+        LOGGER.debug("Generated Upsert SQL: {}", sql);
+        return sql;
     }
 
     @Override
@@ -188,17 +260,19 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
     @Override
     public String getFormattedDateTimeWithNanos(TemporalAccessor value) {
+        LOGGER.debug("Formatting date time with nanos: {}", value);
         return String.format("'%s'", DateTimeFormatter.ISO_LOCAL_DATE_TIME.format(value));
     }
 
     @Override
     public String getFormattedTime(TemporalAccessor value) {
+        LOGGER.debug("Formatting time: {}", value);
         return String.format("'%s'", DateTimeFormatter.ISO_LOCAL_TIME.format(value));
     }
 
     @Override
     protected Optional<String> getDatabaseTimeZoneQuery() {
-        return Optional.of("SELECT CURRENT_TIMEZONE()");
+        return Optional.of("SHOW PARAMETERS LIKE 'TIMEZONE';");
     }
 
     @Override
@@ -207,6 +281,9 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
         registerType(TextType.INSTANCE);
         registerType(VarcharType.INSTANCE);
+        registerType(TimeWithTimezoneType.INSTANCE);
+        registerType(TimestampType.INSTANCE);
+        registerType(TimestampType2.INSTANCE);
     }
 
     @Override
@@ -255,8 +332,8 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
     protected String toIdentifier(TableId tableId) {
         final boolean quoted = getConfig().isQuoteIdentifiers();
-        final Identifier catalog = getIdentifierHelper().toIdentifier(tableId.getCatalogName().toUpperCase(), quoted);
-        final Identifier schema = getIdentifierHelper().toIdentifier(tableId.getSchemaName().toUpperCase(), quoted);
+        final Identifier catalog = getIdentifierHelper().toIdentifier(getDatabaseName(), quoted);
+        final Identifier schema = getIdentifierHelper().toIdentifier(getSchemaName(), quoted);
         final Identifier table = getIdentifierHelper().toIdentifier(tableId.getTableName().toUpperCase(), quoted);
 
         if (catalog != null && schema != null && table != null) {

@@ -5,13 +5,11 @@
  */
 package io.debezium.connector.jdbc.type.connect;
 
-import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.errors.ConnectException;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import io.debezium.connector.jdbc.dialect.DatabaseDialect;
 import io.debezium.connector.jdbc.type.Type;
 
 /**
@@ -28,12 +26,6 @@ public abstract class AbstractConnectMapType extends AbstractConnectSchemaType {
     @Override
     public String[] getRegistrationKeys() {
         return new String[]{ "MAP" };
-    }
-
-    @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        // No default value is permitted
-        return null;
     }
 
     protected String mapToJsonString(Object value) {

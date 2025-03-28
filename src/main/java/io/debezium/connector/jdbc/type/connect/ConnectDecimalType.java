@@ -56,13 +56,4 @@ public class ConnectDecimalType extends AbstractType {
         }
         return dialect.getTypeName(Types.DECIMAL);
     }
-
-    @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        if (value instanceof Number) {
-            return value.toString();
-        }
-        throwUnexpectedValue(value);
-        return null;
-    }
 }

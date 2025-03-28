@@ -13,7 +13,6 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.errors.ConnectException;
 
 import io.debezium.connector.jdbc.ValueBindDescriptor;
-import io.debezium.connector.jdbc.dialect.DatabaseDialect;
 import io.debezium.connector.jdbc.type.AbstractTimestampType;
 import io.debezium.connector.jdbc.type.Type;
 import io.debezium.time.ZonedTimestamp;
@@ -32,11 +31,6 @@ public class DebeziumZonedTimestampType extends AbstractTimestampType {
     @Override
     public String[] getRegistrationKeys() {
         return new String[]{ ZonedTimestamp.SCHEMA_NAME };
-    }
-
-    @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        return dialect.getFormattedTimestampWithTimeZone((String) value);
     }
 
     @Override

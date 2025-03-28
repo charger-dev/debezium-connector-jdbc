@@ -14,7 +14,6 @@ import org.hibernate.engine.jdbc.Size;
 import io.debezium.connector.jdbc.ValueBindDescriptor;
 import io.debezium.connector.jdbc.dialect.DatabaseDialect;
 import io.debezium.connector.jdbc.type.Type;
-import io.debezium.connector.jdbc.util.ByteArrayUtils;
 
 /**
  * An implementation of {@link Type} that supports {@code BYTES} connect schema types.
@@ -28,11 +27,6 @@ public class ConnectBytesType extends AbstractConnectSchemaType {
     @Override
     public String[] getRegistrationKeys() {
         return new String[]{ "BYTES" };
-    }
-
-    @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        return String.format(dialect.getByteArrayFormat(), ByteArrayUtils.getByteArrayAsHex(value));
     }
 
     @Override

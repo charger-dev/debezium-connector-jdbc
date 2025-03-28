@@ -33,12 +33,6 @@ class JsonType extends AbstractType {
     }
 
     @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        // No default value is permitted
-        return null;
-    }
-
-    @Override
     public String getTypeName(DatabaseDialect dialect, Schema schema, boolean key) {
         return "json";
     }

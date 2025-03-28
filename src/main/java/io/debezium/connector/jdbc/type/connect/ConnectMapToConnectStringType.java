@@ -36,11 +36,6 @@ public class ConnectMapToConnectStringType extends AbstractConnectMapType {
     }
 
     @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        return ConnectStringType.INSTANCE.getDefaultValueBinding(dialect, schema, value);
-    }
-
-    @Override
     public List<ValueBindDescriptor> bind(int index, Schema schema, Object value) {
         if (value instanceof Map) {
             value = mapToJsonString(value);

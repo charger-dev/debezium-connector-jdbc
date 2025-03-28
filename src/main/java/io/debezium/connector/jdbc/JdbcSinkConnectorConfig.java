@@ -47,6 +47,8 @@ public class JdbcSinkConnectorConfig {
     public static final String CONNECTION_URL = "connection.url";
     public static final String CONNECTION_USER = "connection.username";
     public static final String CONNECTION_PASSWORD = "connection.password";
+    public static final String CONNECTION_DATABASE = "connection.database";
+    public static final String CONNECTION_SCHEMA = "connection.schema";
     public static final String CONNECTION_POOL_MIN_SIZE = "connection.pool.min_size";
     public static final String CONNECTION_POOL_MAX_SIZE = "connection.pool.max_size";
     public static final String CONNECTION_POOL_ACQUIRE_INCREMENT = "connection.pool.acquire_increment";
@@ -108,6 +110,22 @@ public class JdbcSinkConnectorConfig {
             .withImportance(ConfigDef.Importance.HIGH)
             .required()
             .withDescription("Password of the database user to be used when connecting to the connection.");
+
+    public static final Field CONNECTION_DATABASE_FIELD = Field.create(CONNECTION_DATABASE)
+            .withDisplayName("Database")
+            .withType(Type.STRING)
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 4))
+            .withWidth(ConfigDef.Width.SHORT)
+            .withImportance(ConfigDef.Importance.HIGH)
+            .withDescription("Name of the database to be used when connecting to the connection.");
+
+    public static final Field CONNECTION_SCHEMA_FIELD = Field.create(CONNECTION_SCHEMA)
+            .withDisplayName("Database")
+            .withType(Type.STRING)
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 5))
+            .withWidth(ConfigDef.Width.SHORT)
+            .withImportance(ConfigDef.Importance.HIGH)
+            .withDescription("Name of the schema to be used when connecting to the connection.");
 
     public static final Field CONNECTION_POOL_MIN_SIZE_FIELD = Field.create(CONNECTION_POOL_MIN_SIZE)
             .withDisplayName("Connection pool minimum size")
@@ -324,6 +342,8 @@ public class JdbcSinkConnectorConfig {
                     CONNECTION_URL_FIELD,
                     CONNECTION_USER_FIELD,
                     CONNECTION_PASSWORD_FIELD,
+                    CONNECTION_DATABASE_FIELD,
+                    CONNECTION_SCHEMA_FIELD,
                     CONNECTION_POOL_MIN_SIZE_FIELD,
                     CONNECTION_POOL_MAX_SIZE_FIELD,
                     CONNECTION_POOL_ACQUIRE_INCREMENT_FIELD,
@@ -678,6 +698,14 @@ public class JdbcSinkConnectorConfig {
 
     public String getConnectorName() {
         return Module.name();
+    }
+
+    public String getConnectionDatabase() {
+        return config.getString(CONNECTION_DATABASE_FIELD);
+    }
+
+    public String getConnectionSchema() {
+        return config.getString(CONNECTION_SCHEMA_FIELD);
     }
 
     private static int validateInsertMode(Configuration config, Field field, ValidationOutput problems) {

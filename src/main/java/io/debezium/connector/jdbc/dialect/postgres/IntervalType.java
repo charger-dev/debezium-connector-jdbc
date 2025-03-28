@@ -41,16 +41,6 @@ class IntervalType extends AbstractType {
     }
 
     @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        if (value instanceof Long) {
-            final double doubleValue = ((Long) value).doubleValue() / 1_000_000d;
-            return String.format("'%d seconds'", (long) doubleValue);
-        }
-        // apply no default
-        return null;
-    }
-
-    @Override
     public List<ValueBindDescriptor> bind(int index, Schema schema, Object value) {
 
         if (value != null && Long.class.isAssignableFrom(value.getClass())) {

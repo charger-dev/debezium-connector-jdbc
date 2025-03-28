@@ -87,7 +87,7 @@ import io.debezium.util.Strings;
  */
 public class GeneralDatabaseDialect implements DatabaseDialect {
 
-    protected static final Logger LOGGER = LoggerFactory.getLogger(GeneralDatabaseDialect.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(GeneralDatabaseDialect.class);
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC);
 
     private final JdbcSinkConnectorConfig connectorConfig;
@@ -658,6 +658,10 @@ public class GeneralDatabaseDialect implements DatabaseDialect {
 
     protected void registerType(Type type) {
         type.configure(connectorConfig, this);
+        for (Map.Entry<String, Type> entry : typeRegistry.entrySet()) {
+            LOGGER.debug("typeRegistry - Key: " + entry.getKey() + ", Value: " + entry.getValue());
+        }
+
         for (String key : type.getRegistrationKeys()) {
             final Type existing = typeRegistry.put(key, type);
             if (existing != null) {
@@ -686,13 +690,6 @@ public class GeneralDatabaseDialect implements DatabaseDialect {
     }
 
     protected void addColumnDefaultValue(FieldDescriptor field, StringBuilder columnSpec) {
-        if (field.getSchema().defaultValue() != null) {
-            final String defaultValue = field.getType().getDefaultValueBinding(this, field.getSchema(), field.getSchema().defaultValue());
-            // final String defaultValue = resolveColumnDefaultValue(field, field.getSchema().defaultValue());
-            if (defaultValue != null) {
-                columnSpec.append(" DEFAULT ").append(defaultValue);
-            }
-        }
     }
 
     protected String columnQueryBindingFromField(String fieldName, TableDescriptor table, SinkRecordDescriptor record) {
@@ -788,7 +785,7 @@ public class GeneralDatabaseDialect implements DatabaseDialect {
         return toIdentifier(tableId.getTableName());
     }
 
-    private String columnNameEqualsBinding(String fieldName, TableDescriptor table, SinkRecordDescriptor record) {
+    protected String columnNameEqualsBinding(String fieldName, TableDescriptor table, SinkRecordDescriptor record) {
         final FieldDescriptor field = record.getFields().get(fieldName);
         final String columnName = resolveColumnName(field);
         final ColumnDescriptor column = table.getColumnByName(columnName);

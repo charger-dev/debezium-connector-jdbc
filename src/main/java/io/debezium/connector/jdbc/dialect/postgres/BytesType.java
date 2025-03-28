@@ -13,7 +13,6 @@ import org.hibernate.engine.jdbc.Size;
 import io.debezium.connector.jdbc.dialect.DatabaseDialect;
 import io.debezium.connector.jdbc.type.AbstractBytesType;
 import io.debezium.connector.jdbc.type.Type;
-import io.debezium.connector.jdbc.util.ByteArrayUtils;
 
 /**
  * An implementation of {@link Type} for {@code BYTES} column types.
@@ -23,11 +22,6 @@ import io.debezium.connector.jdbc.util.ByteArrayUtils;
 class BytesType extends AbstractBytesType {
 
     public static final BytesType INSTANCE = new BytesType();
-
-    @Override
-    public String getDefaultValueBinding(DatabaseDialect dialect, Schema schema, Object value) {
-        return String.format(dialect.getByteArrayFormat(), ByteArrayUtils.getByteArrayAsHex(value));
-    }
 
     @Override
     public String getTypeName(DatabaseDialect dialect, Schema schema, boolean key) {

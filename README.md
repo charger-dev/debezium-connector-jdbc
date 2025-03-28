@@ -104,6 +104,13 @@ If you don't have a Docker environment, you can skip the integration tests by us
 
     $ ./mvnw clean verify -DskipITs
 
+
+### Building the connector
+./mvnw clean install -DskipTests -Passembly
+
+### Deploying the connector
+./build_and_deploy_prod.sh
+
 ### Running the tests 
 
 There are three types of types in the test suite:

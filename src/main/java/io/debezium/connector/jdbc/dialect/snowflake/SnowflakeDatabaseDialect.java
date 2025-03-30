@@ -19,7 +19,6 @@ import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAccessor;
 import java.util.Optional;
-import java.util.Set;
 
 import org.apache.kafka.connect.data.Schema;
 import org.hibernate.SessionFactory;

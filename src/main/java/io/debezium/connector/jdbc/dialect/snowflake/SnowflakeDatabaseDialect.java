@@ -18,7 +18,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAccessor;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import org.apache.kafka.connect.data.Schema;
 import org.hibernate.SessionFactory;
@@ -136,6 +139,36 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
     }
 
     @Override
+    public String getDeleteStatementBulk(TableDescriptor table, SinkRecordDescriptor record, int bulkSize) {
+        final SqlStatementBuilder builder = new SqlStatementBuilder();
+        builder.append("DELETE FROM ");
+        builder.append(getQualifiedTableName(table.getId().toUpperCase()));
+
+        List<String> keyFields = record.getKeyFieldNames();
+        if (!keyFields.isEmpty()) {
+            builder.append(" WHERE (");
+            builder.appendList(", ", keyFields, name -> columnNameFromField(name, record));
+            builder.append(") IN (");
+
+            // Add parameter placeholders for each batch
+            for (int i = 0; i < bulkSize; i++) {
+                if (i > 0) {
+                    builder.append(", ");
+                }
+                builder.append("(");
+                builder.append(String.join(", ", Collections.nCopies(keyFields.size(), "?")));
+                builder.append(")");
+            }
+
+            builder.append(")");
+        }
+
+        String sql = builder.build();
+        LOGGER.debug("Generated bulk delete statement: {}", sql);
+        return sql;
+    }
+
+    @Override
     public String getDeleteStatement(TableDescriptor table, SinkRecordDescriptor record) {
         final SqlStatementBuilder builder = new SqlStatementBuilder();
         builder.append("DELETE FROM ");
@@ -193,31 +226,24 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
     public String getUpsertStatement(TableDescriptor table, SinkRecordDescriptor record) {
         SqlStatementBuilder builder = new SqlStatementBuilder();
 
-        builder.append("MERGE INTO ");
+        builder.append("INSERT INTO ");
         builder.append(getQualifiedTableName(table.getId()));
-        builder.append(" AS target USING (SELECT ");
+        builder.append(" (");
 
-        builder.appendLists(", ", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
-                name -> columnQueryBindingFromField(name, table, record) + " AS " + columnNameFromField(name, record));
-
-        builder.append(") AS source ON ");
-        builder.appendList(" AND ", record.getKeyFieldNames(),
-                name -> "target." + columnNameFromField(name, record) + " = source." + columnNameFromField(name, record));
-
-        builder.append(" WHEN MATCHED THEN UPDATE SET ");
-        builder.appendList(", ", record.getNonKeyFieldNames(),
-                name -> "target." + columnNameFromField(name, record) + " = source." + columnNameFromField(name, record));
-
-        builder.append(" WHEN NOT MATCHED THEN INSERT (");
+        // Append column names (both key and non-key fields)
         builder.appendLists(", ", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
                 name -> columnNameFromField(name, record));
+
         builder.append(") VALUES (");
+
+        // Append corresponding values
         builder.appendLists(", ", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
-                name -> "source." + columnNameFromField(name, record));
+                name -> columnQueryBindingFromField(name, table, record));
+
         builder.append(");");
 
         String sql = builder.build();
-        LOGGER.debug("Generated Upsert SQL: {}", sql);
+        LOGGER.debug("Generated Insert SQL: {}", sql);
         return sql;
     }
 
@@ -240,8 +266,8 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
     @Override
     protected String getQualifiedTableName(TableId tableId) {
-        if (!Strings.isNullOrBlank(tableId.getSchemaName())) {
-            return "\"" + tableId.getSchemaName().toUpperCase() + "\"." + "\"" + tableId.getTableName().toUpperCase() + "\"";
+        if (!Strings.isNullOrBlank(getSchemaName())) {
+            return "\"" + getSchemaName() + "\"." + "\"" + tableId.getTableName().toUpperCase() + "\"";
         }
         return "\"" + tableId.getTableName().toUpperCase() + "\"";
     }
@@ -283,11 +309,11 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
         registerType(TimeWithTimezoneType.INSTANCE);
         registerType(TimestampType.INSTANCE);
         registerType(TimestampType2.INSTANCE);
+        registerType(CustomConnectStringType.INSTANCE);
     }
 
     @Override
     public String getTypeName(int jdbcType) {
-        LOGGER.info("Getting type name for jdbcType {}", jdbcType);
         switch (jdbcType) {
             case TIMESTAMP_WITH_TIMEZONE:
                 return "TIMESTAMP_TZ";
@@ -309,9 +335,7 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
     @Override
     public int getMaxVarcharLengthInKey() {
-        // Setting to Integer.MAX_VALUE forces Snowflake to use TEXT data types in primary keys
-        // when no explicit size on the column is specified.
-        return Integer.MAX_VALUE;
+        return 16777216;
     }
 
     @Override
@@ -357,5 +381,31 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
     @Override
     public String getTimestampNegativeInfinityValue() {
         return NEGATIVE_INFINITY;
+    }
+
+    @Override
+    public int getMaxNVarcharLengthInKey() {
+        return 16777216;
+    }
+
+    @Override
+    public String getAlterTableStatement(TableDescriptor table, SinkRecordDescriptor record, Set<String> missingFields) {
+        final SqlStatementBuilder builder = new SqlStatementBuilder();
+        builder.append("ALTER TABLE ");
+        builder.append(getQualifiedTableName(table.getId()));
+        builder.append(" ");
+        builder.append(getAlterTablePrefix());
+        builder.appendList(getAlterTableColumnDelimiter(), missingFields, (name) -> {
+            final SinkRecordDescriptor.FieldDescriptor field = record.getFields().get(name);
+            final StringBuilder addColumnSpec = new StringBuilder();
+            addColumnSpec.append(getAlterTableColumnPrefix());
+            addColumnSpec.append(" ");
+            addColumnSpec.append(toIdentifier(columnNamingStrategy.resolveColumnName(field.getColumnName())));
+            addColumnSpec.append(" ").append(field.getTypeName());
+            addColumnSpec.append(getAlterTableColumnSuffix());
+            return addColumnSpec.toString();
+        });
+        builder.append(getAlterTableSuffix());
+        return builder.build();
     }
 }

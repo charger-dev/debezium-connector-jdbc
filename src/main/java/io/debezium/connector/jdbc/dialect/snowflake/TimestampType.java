@@ -29,7 +29,6 @@ public class TimestampType extends AbstractTimestampType {
     }
 
     public List<ValueBindDescriptor> bind(int index, Schema schema, Object value) {
-        LOGGER.debug("TEST Timestamp bind");
         if (value == null) {
             return List.of(new ValueBindDescriptor(index, null));
         }

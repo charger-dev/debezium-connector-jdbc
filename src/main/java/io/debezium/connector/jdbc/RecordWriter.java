@@ -41,14 +41,19 @@ public class RecordWriter {
         this.dialect = dialect;
     }
 
-    public void write(List<SinkRecordDescriptor> records, String sqlStatement) {
+    public void write(List<SinkRecordDescriptor> records, String sqlStatement, Boolean isBulkDelete) {
 
         Stopwatch writeStopwatch = Stopwatch.reusable();
         writeStopwatch.start();
         final Transaction transaction = session.beginTransaction();
 
         try {
-            session.doWork(processBatch(records, sqlStatement));
+            if (isBulkDelete) {
+                session.doWork(processBulkDelete(records, sqlStatement));
+            }
+            else {
+                session.doWork(processBatch(records, sqlStatement));
+            }
             transaction.commit();
         }
         catch (Exception e) {
@@ -57,6 +62,50 @@ public class RecordWriter {
         }
         writeStopwatch.stop();
         LOGGER.trace("[PERF] Total write execution time {}", writeStopwatch.durations());
+    }
+
+    private Work processBulkDelete(List<SinkRecordDescriptor> records, String sqlStatement) {
+
+        return conn -> {
+
+            try (PreparedStatement prepareStatement = conn.prepareStatement(sqlStatement)) {
+
+                QueryBinder queryBinder = queryBinderResolver.resolve(prepareStatement);
+                Stopwatch bindStopwatch = Stopwatch.reusable();
+                bindStopwatch.start();
+
+                int paramIndex = 1;
+
+                for (SinkRecordDescriptor record : records) {
+                    final Struct keySource = record.getKeyStruct(config.getPrimaryKeyMode());
+
+                    for (String fieldName : record.getKeyFieldNames()) {
+                        final SinkRecordDescriptor.FieldDescriptor field = record.getFields().get(fieldName);
+                        Object value = keySource.getWithoutDefault(fieldName);
+
+                        List<ValueBindDescriptor> boundValues = dialect.bindValue(field, paramIndex, value);
+                        boundValues.forEach(queryBinder::bind);
+                        paramIndex += boundValues.size();
+                    }
+                }
+
+                bindStopwatch.stop();
+                LOGGER.trace("[PERF] All records bind execution time {}", bindStopwatch.durations());
+
+                Stopwatch executeStopwatch = Stopwatch.reusable();
+                executeStopwatch.start();
+
+                int updateCount = prepareStatement.executeUpdate(); // no executeBatch — just one delete
+
+                executeStopwatch.stop();
+
+                if (updateCount == Statement.EXECUTE_FAILED) {
+                    throw new BatchUpdateException("Bulk delete execution failed.", new int[]{ updateCount });
+                }
+
+                LOGGER.trace("[PERF] Execute bulk delete execution time {}", executeStopwatch.durations());
+            }
+        };
     }
 
     private Work processBatch(List<SinkRecordDescriptor> records, String sqlStatement) {
@@ -72,7 +121,7 @@ public class RecordWriter {
 
                     Stopwatch singlebindStopwatch = Stopwatch.reusable();
                     singlebindStopwatch.start();
-                    bindValues(sinkRecordDescriptor, queryBinder);
+                    bindValues(sinkRecordDescriptor, queryBinder, false);
                     singlebindStopwatch.stop();
 
                     Stopwatch addBatchStopwatch = Stopwatch.reusable();
@@ -100,10 +149,10 @@ public class RecordWriter {
         };
     }
 
-    private void bindValues(SinkRecordDescriptor sinkRecordDescriptor, QueryBinder queryBinder) {
+    private void bindValues(SinkRecordDescriptor sinkRecordDescriptor, QueryBinder queryBinder, Boolean bindKeyValuesOnly) {
 
         int index;
-        if (sinkRecordDescriptor.isDelete()) {
+        if (sinkRecordDescriptor.isDelete() || bindKeyValuesOnly) {
             bindKeyValuesToQuery(sinkRecordDescriptor, queryBinder, 1);
             return;
         }

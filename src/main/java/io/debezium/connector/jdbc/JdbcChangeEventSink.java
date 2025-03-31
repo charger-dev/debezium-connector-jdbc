@@ -25,7 +25,6 @@ import org.hibernate.query.NativeQuery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.debezium.connector.jdbc.SinkRecordDescriptor.FieldDescriptor;
 import io.debezium.connector.jdbc.dialect.DatabaseDialect;
 import io.debezium.connector.jdbc.naming.TableNamingStrategy;
 import io.debezium.connector.jdbc.relational.TableDescriptor;
@@ -212,14 +211,25 @@ public class JdbcChangeEventSink implements ChangeEventSink {
         Stopwatch flushBufferStopwatch = Stopwatch.reusable();
         Stopwatch tableChangesStopwatch = Stopwatch.reusable();
         if (!toFlush.isEmpty()) {
-            LOGGER.debug("Flushing records in JDBC Writer for table: {}", tableId.getTableName());
+            int bulkSize = toFlush.size();
+            LOGGER.info("Flushing records in JDBC Writer for table {} with size {}", tableId.getTableName(), bulkSize);
             try {
+                SinkRecordDescriptor record_0 = toFlush.get(0);
                 tableChangesStopwatch.start();
                 final TableDescriptor table = checkAndApplyTableChangesIfNeeded(tableId, toFlush.get(0));
                 tableChangesStopwatch.stop();
-                String sqlStatement = getSqlStatement(table, toFlush.get(0));
+
                 flushBufferStopwatch.start();
-                recordWriter.write(toFlush, sqlStatement);
+                if (record_0.isDelete()) {
+                    String deleteStatement = getSqlStatement(table, toFlush.get(0), true, bulkSize);
+                    recordWriter.write(toFlush, deleteStatement, true);
+                }
+                else {
+                    String deleteStatement = getSqlStatement(table, toFlush.get(0), true, bulkSize);
+                    String insertStatement = getSqlStatement(table, toFlush.get(0), false, bulkSize);
+                    recordWriter.write(toFlush, deleteStatement, true);
+                    recordWriter.write(toFlush, insertStatement, false);
+                }
                 flushBufferStopwatch.stop();
 
                 LOGGER.trace("[PERF] Flush buffer execution time {}", flushBufferStopwatch.durations());
@@ -334,15 +344,6 @@ public class JdbcChangeEventSink implements ChangeEventSink {
         }
 
         LOGGER.debug("The follow fields are missing in the table: {}", missingFields);
-        for (String missingFieldName : missingFields) {
-            final FieldDescriptor fieldDescriptor = record.getFields().get(missingFieldName);
-            if (!fieldDescriptor.getSchema().isOptional() && fieldDescriptor.getSchema().defaultValue() == null) {
-                throw new SQLException(String.format(
-                        "Cannot ALTER table '%s' because field '%s' is not optional but has no default value",
-                        tableId.toFullIdentiferString(), fieldDescriptor.getName()));
-            }
-        }
-
         if (NONE.equals(config.getSchemaEvolutionMode())) {
             LOGGER.warn("Table '{}' cannot be altered because schema evolution is disabled.", tableId.toFullIdentiferString());
             throw new SQLException("Cannot alter table " + tableId.toFullIdentiferString() + " because schema evolution is disabled");
@@ -363,9 +364,9 @@ public class JdbcChangeEventSink implements ChangeEventSink {
         return readTable(tableId);
     }
 
-    private String getSqlStatement(TableDescriptor table, SinkRecordDescriptor record) {
+    private String getSqlStatement(TableDescriptor table, SinkRecordDescriptor record, Boolean isDelete, int bulkSize) {
 
-        if (!record.isDelete()) {
+        if (!record.isDelete() && !isDelete) {
             switch (config.getInsertMode()) {
                 case INSERT:
                     return dialect.getInsertStatement(table, record);
@@ -379,7 +380,7 @@ public class JdbcChangeEventSink implements ChangeEventSink {
             }
         }
         else {
-            return dialect.getDeleteStatement(table, record);
+            return dialect.getDeleteStatementBulk(table, record, bulkSize);
         }
 
         throw new DataException(String.format("Unable to get SQL statement for %s", record));

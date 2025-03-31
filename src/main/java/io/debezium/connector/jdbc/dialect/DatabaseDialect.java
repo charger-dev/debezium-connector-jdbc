@@ -169,6 +169,15 @@ public interface DatabaseDialect {
     String getDeleteStatement(TableDescriptor table, SinkRecordDescriptor record);
 
     /**
+     * Construct a {@code DELETE} statement specific for this dialect.
+     *
+     * @param table the current relational table model, should not be {@code null}
+     * @param record the current sink record being processed, should not be {@code null}
+     * @return the delete SQL statement to be executed, never {@code null}
+     */
+    String getDeleteStatementBulk(TableDescriptor table, SinkRecordDescriptor record, int bulkSize);
+
+    /**
      * Construct a {@code TRUNCATE} statement specific for this dialect.
      *
      * @param table the current relational table model, should not be {@code null}

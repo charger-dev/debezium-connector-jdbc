@@ -43,7 +43,6 @@ public class PreparedStatementQueryBinder implements QueryBinder {
             return java.sql.Timestamp.from((java.time.Instant) value);
         }
         else if (value instanceof java.util.Date) {
-            LOGGER.debug("Binding java.util.Date");
             return new java.sql.Timestamp(((java.util.Date) value).getTime());
         }
         else if (value instanceof java.util.Calendar) {
@@ -57,9 +56,6 @@ public class PreparedStatementQueryBinder implements QueryBinder {
 
     @Override
     public void bind(ValueBindDescriptor valueBindDescriptor) {
-
-        LOGGER.debug("PreparedStatementQueryBinder Binding value {} type {} to index {}", valueBindDescriptor.getValue(), valueBindDescriptor.getValue().getClass(),
-                valueBindDescriptor.getIndex());
         Object value = convertValueToSql(valueBindDescriptor.getValue());
         try {
             if (valueBindDescriptor.getTargetSqlType() != null) {

@@ -39,7 +39,6 @@ class TimeWithTimezoneType extends ZonedTimeType {
 
     @Override
     public List<ValueBindDescriptor> bind(int index, Schema schema, Object value) {
-        LOGGER.debug("TEST TimeWithTimezone bind");
         if (value == null) {
             return List.of(new ValueBindDescriptor(index, null));
         }

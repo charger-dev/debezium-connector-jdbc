@@ -401,6 +401,11 @@ public class GeneralDatabaseDialect implements DatabaseDialect {
     }
 
     @Override
+    public String getDeleteStatementBulk(TableDescriptor table, SinkRecordDescriptor record, int bulkSize) {
+        throw new UnsupportedOperationException("Bulk delete configurations are not supported for this dialect");
+    }
+
+    @Override
     public String getTruncateStatement(TableDescriptor table) {
         final SqlStatementBuilder builder = new SqlStatementBuilder();
         builder.append("TRUNCATE TABLE ");

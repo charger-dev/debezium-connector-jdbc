@@ -5,6 +5,8 @@
  */
 package io.debezium.connector.jdbc;
 
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -42,11 +44,13 @@ public class JdbcSinkConnectorConfig {
 
     private static final String HIBERNATE_PREFIX = "hibernate.";
     private static final String DEFAULT_DATABASE_TIME_ZONE = "UTC";
+    private static final String PRIVATE_KEY_PATH = "/tmp/private_key.pem";
 
     public static final String CONNECTION_PROVIDER = "connection.provider";
     public static final String CONNECTION_URL = "connection.url";
     public static final String CONNECTION_USER = "connection.username";
     public static final String CONNECTION_PASSWORD = "connection.password";
+    public static final String CONNECTION_PRIVATE_KEY = "connection.private.key";
     public static final String CONNECTION_DATABASE = "connection.database";
     public static final String CONNECTION_SCHEMA = "connection.schema";
     public static final String CONNECTION_POOL_MIN_SIZE = "connection.pool.min_size";
@@ -162,6 +166,14 @@ public class JdbcSinkConnectorConfig {
             .withImportance(ConfigDef.Importance.LOW)
             .withDefault(1800)
             .withDescription("Connection pool timeout");
+
+    public static final Field CONNECTION_PRIVATE_KEY_FIELD = Field.create(CONNECTION_PRIVATE_KEY)
+            .withDisplayName("Password")
+            .withType(Type.STRING)
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 8))
+            .withWidth(ConfigDef.Width.LONG)
+            .withImportance(ConfigDef.Importance.HIGH)
+            .withDescription("Private key of the database user to be used when connecting to the connection.");
 
     public static final Field INSERT_MODE_FIELD = Field.create(INSERT_MODE)
             .withDisplayName("The insertion mode to use")
@@ -348,6 +360,7 @@ public class JdbcSinkConnectorConfig {
                     CONNECTION_POOL_MAX_SIZE_FIELD,
                     CONNECTION_POOL_ACQUIRE_INCREMENT_FIELD,
                     CONNECTION_POOL_TIMEOUT_FIELD,
+                    CONNECTION_PRIVATE_KEY_FIELD,
                     INSERT_MODE_FIELD,
                     DELETE_ENABLED_FIELD,
                     TRUNCATE_ENABLED_FIELD,
@@ -667,8 +680,27 @@ public class JdbcSinkConnectorConfig {
      */
     public org.hibernate.cfg.Configuration getHibernateConfiguration() {
         org.hibernate.cfg.Configuration hibernateConfig = new org.hibernate.cfg.Configuration();
+
+        String url = config.getString(CONNECTION_URL_FIELD);
+        if (config.hasKey(CONNECTION_PRIVATE_KEY_FIELD)) {
+            String privateKeyContent = config.getString(CONNECTION_PRIVATE_KEY_FIELD);
+
+            try (FileWriter writer = new FileWriter(PRIVATE_KEY_PATH)) {
+                writer.write(privateKeyContent);
+                writer.flush();
+            }
+            catch (IOException e) {
+                LOGGER.error("Failed to write private key to file", e);
+                throw new RuntimeException("Failed to write private key to file", e);
+            }
+
+            String privateKeyParam = "&private_key_file=" + PRIVATE_KEY_PATH;
+            url = url.contains("?") ? url + privateKeyParam : url + "?" + privateKeyParam;
+            LOGGER.info("url with private key: {}", url);
+        }
+
         hibernateConfig.setProperty(AvailableSettings.CONNECTION_PROVIDER, config.getString(CONNECTION_PROVIDER_FIELD));
-        hibernateConfig.setProperty(AvailableSettings.URL, config.getString(CONNECTION_URL_FIELD));
+        hibernateConfig.setProperty(AvailableSettings.URL, url);
         hibernateConfig.setProperty(AvailableSettings.USER, config.getString(CONNECTION_USER_FIELD));
         hibernateConfig.setProperty(AvailableSettings.PASS, config.getString(CONNECTION_PASSWORD_FIELD));
         hibernateConfig.setProperty(AvailableSettings.C3P0_MIN_SIZE, config.getString(CONNECTION_POOL_MIN_SIZE_FIELD));

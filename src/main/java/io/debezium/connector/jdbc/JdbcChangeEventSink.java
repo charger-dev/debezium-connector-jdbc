@@ -5,6 +5,7 @@
  */
 package io.debezium.connector.jdbc;
 
+import static io.debezium.connector.jdbc.JdbcSinkConnectorConfig.InsertMode.INSERT;
 import static io.debezium.connector.jdbc.JdbcSinkConnectorConfig.SchemaEvolutionMode.NONE;
 
 import java.sql.SQLException;
@@ -225,10 +226,16 @@ public class JdbcChangeEventSink implements ChangeEventSink {
                     recordWriter.write(toFlush, deleteStatement, true);
                 }
                 else {
-                    String deleteStatement = getSqlStatement(table, toFlush.get(0), true, bulkSize);
-                    String insertStatement = getSqlStatement(table, toFlush.get(0), false, bulkSize);
-                    recordWriter.write(toFlush, deleteStatement, true);
-                    recordWriter.write(toFlush, insertStatement, false);
+                    if (config.getInsertMode() == INSERT) {
+                        String insertStatement = getSqlStatement(table, toFlush.get(0), false, bulkSize);
+                        recordWriter.write(toFlush, insertStatement, false);
+                    }
+                    else {
+                        String deleteStatement = getSqlStatement(table, toFlush.get(0), true, bulkSize);
+                        String insertStatement = getSqlStatement(table, toFlush.get(0), false, bulkSize);
+                        recordWriter.write(toFlush, deleteStatement, true);
+                        recordWriter.write(toFlush, insertStatement, false);
+                    }
                 }
                 flushBufferStopwatch.stop();
 
@@ -263,6 +270,13 @@ public class JdbcChangeEventSink implements ChangeEventSink {
     }
 
     private TableDescriptor checkAndApplyTableChangesIfNeeded(TableId tableId, SinkRecordDescriptor descriptor) throws SQLException {
+        try {
+            createSchema(tableId.getCatalogName());
+        }
+        catch (SQLException e) {
+            LOGGER.info("Schema '{}' already exists.", tableId.getCatalogName());
+        }
+
         if (!hasTable(tableId)) {
             // Table does not exist, lets attempt to create it.
             try {
@@ -322,6 +336,21 @@ public class JdbcChangeEventSink implements ChangeEventSink {
         }
 
         return readTable(tableId);
+    }
+
+    private void createSchema(String schema) throws SQLException {
+        LOGGER.debug("Attempting to create schema '{}'.", schema);
+
+        Transaction transaction = session.beginTransaction();
+        try {
+            final String createSql = dialect.getCreateSchemaStatement(schema);
+            session.createNativeQuery(createSql, Object.class).executeUpdate();
+            transaction.commit();
+        }
+        catch (Exception e) {
+            transaction.rollback();
+            throw e;
+        }
     }
 
     private TableDescriptor alterTableIfNeeded(TableId tableId, SinkRecordDescriptor record) throws SQLException {

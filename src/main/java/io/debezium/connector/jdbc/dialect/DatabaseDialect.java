@@ -78,6 +78,14 @@ public interface DatabaseDialect {
     Set<String> resolveMissingFields(SinkRecordDescriptor record, TableDescriptor table);
 
     /**
+     * Construct a {@code CREATE SCHEMA} statement specific for this dialect based on the provided record.
+     *
+     * @param schema the schema name to be used, should not be {@code null}
+     * @return the create table SQL statement to be executed, never {@code null}
+     */
+    String getCreateSchemaStatement(String schema);
+
+    /**
      * Construct a {@code CREATE TABLE} statement specific for this dialect based on the provided record.
      *
      * @param record the current sink record being processed, should not be {@code null}

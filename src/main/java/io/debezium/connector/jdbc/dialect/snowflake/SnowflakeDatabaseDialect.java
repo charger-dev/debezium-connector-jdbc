@@ -199,6 +199,11 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
     }
 
     @Override
+    public String getCreateSchemaStatement(String schema) {
+        return "CREATE SCHEMA IF NOT EXISTS " + getSchemaName();
+    }
+
+    @Override
     public String getCreateTableStatement(SinkRecordDescriptor record, TableId tableId) {
         final SqlStatementBuilder builder = new SqlStatementBuilder();
         builder.append("CREATE TABLE ");
@@ -230,13 +235,34 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
         builder.append(getQualifiedTableName(table.getId()));
         builder.append(" (");
 
-        // Append column names (both key and non-key fields)
         builder.appendLists(", ", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
-                name -> columnNameFromField(name, record));
+                name -> "\"" + columnNameFromField(name, record) + "\"");
 
         builder.append(") VALUES (");
 
-        // Append corresponding values
+        builder.appendLists(", ", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
+                name -> columnQueryBindingFromField(name, table, record));
+
+        builder.append(");");
+
+        String sql = builder.build();
+        LOGGER.debug("Generated Upsert SQL: {}", sql);
+        return sql;
+    }
+
+    @Override
+    public String getInsertStatement(TableDescriptor table, SinkRecordDescriptor record) {
+        SqlStatementBuilder builder = new SqlStatementBuilder();
+
+        builder.append("INSERT INTO ");
+        builder.append(getQualifiedTableName(table.getId()));
+        builder.append(" (");
+
+        builder.appendLists(", ", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
+                name -> "\"" + columnNameFromField(name, record) + "\"");
+
+        builder.append(") VALUES (");
+
         builder.appendLists(", ", record.getKeyFieldNames(), record.getNonKeyFieldNames(),
                 name -> columnQueryBindingFromField(name, table, record));
 

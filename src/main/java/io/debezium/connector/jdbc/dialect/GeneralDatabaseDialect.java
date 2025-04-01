@@ -239,6 +239,11 @@ public class GeneralDatabaseDialect implements DatabaseDialect {
         return missingFields;
     }
 
+    @Override
+    public String getCreateSchemaStatement(String schema) {
+        throw new UnsupportedOperationException("Schema creation is not supported for this dialect");
+    }
+
     protected String resolveColumnName(FieldDescriptor field) {
 
         String columnName = columnNamingStrategy.resolveColumnName(field.getColumnName());

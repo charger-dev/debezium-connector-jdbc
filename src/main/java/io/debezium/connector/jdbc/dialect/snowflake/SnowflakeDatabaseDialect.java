@@ -212,11 +212,11 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
         builder.appendLists(", ", record.getKeyFieldNames(), record.getNonKeyFieldNames(), (name) -> {
             final SinkRecordDescriptor.FieldDescriptor field = record.getFields().get(name);
-            final String columnName = toIdentifier(resolveColumnName(field));
+            final String columnName = "\"" + toIdentifier(resolveColumnName(field)) + "\"";
             final String columnType = field.getTypeName();
-            LOGGER.info("Creating column {} with type {}", columnName, columnType);
             return columnName + " " + columnType;
         });
+
         builder.append(")");
 
         return builder.build();
@@ -419,18 +419,19 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
         final SqlStatementBuilder builder = new SqlStatementBuilder();
         builder.append("ALTER TABLE ");
         builder.append(getQualifiedTableName(table.getId()));
-        builder.append(" ");
-        builder.append(getAlterTablePrefix());
-        builder.appendList(getAlterTableColumnDelimiter(), missingFields, (name) -> {
+        builder.append(" ADD ("); // Start ADD clause
+
+        // Append each column definition
+        builder.appendList(", ", missingFields, (name) -> {
             final SinkRecordDescriptor.FieldDescriptor field = record.getFields().get(name);
-            final StringBuilder addColumnSpec = new StringBuilder();
-            addColumnSpec.append(getAlterTableColumnPrefix());
-            addColumnSpec.append(" ");
-            addColumnSpec.append(toIdentifier(columnNamingStrategy.resolveColumnName(field.getColumnName())));
-            addColumnSpec.append(" ").append(field.getTypeName());
-            addColumnSpec.append(getAlterTableColumnSuffix());
-            return addColumnSpec.toString();
+            final StringBuilder columnSpec = new StringBuilder();
+            columnSpec.append(toIdentifier(columnNamingStrategy.resolveColumnName(field.getColumnName())));
+            columnSpec.append(" ").append(field.getTypeName());
+            columnSpec.append(getAlterTableColumnSuffix());
+            return columnSpec.toString();
         });
+
+        builder.append(")");
         builder.append(getAlterTableSuffix());
         return builder.build();
     }

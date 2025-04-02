@@ -315,7 +315,7 @@ public class JdbcSinkConnectorConfig {
             .withGroup(Field.createGroupEntry(Field.Group.CONNECTOR_ADVANCED, 4))
             .withWidth(ConfigDef.Width.SHORT)
             .withImportance(ConfigDef.Importance.MEDIUM)
-            .withDefault(1000)
+            .withDefault(10000)
             .withDescription("Specifies how many records to attempt to batch together into the destination table, when possible. " +
                     "You can also configure the connector’s underlying consumer’s max.poll.records using consumer.override.max.poll.records in the connector configuration.");
 

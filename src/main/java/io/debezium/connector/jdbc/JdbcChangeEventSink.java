@@ -5,7 +5,9 @@
  */
 package io.debezium.connector.jdbc;
 
+import static io.debezium.connector.jdbc.JdbcSinkConnectorConfig.InsertMode.CSV;
 import static io.debezium.connector.jdbc.JdbcSinkConnectorConfig.InsertMode.INSERT;
+import static io.debezium.connector.jdbc.JdbcSinkConnectorConfig.InsertMode.UPSERT;
 import static io.debezium.connector.jdbc.JdbcSinkConnectorConfig.SchemaEvolutionMode.NONE;
 
 import java.sql.SQLException;
@@ -13,8 +15,10 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.DataException;
@@ -67,6 +71,7 @@ public class JdbcChangeEventSink implements ChangeEventSink {
 
         final Map<TableId, Buffer> updateBufferByTable = new HashMap<>();
         final Map<TableId, Buffer> deleteBufferByTable = new HashMap<>();
+        final Map<TableId, Integer> prevColumnCountByTable = new HashMap<>();
 
         for (SinkRecord record : records) {
 
@@ -134,12 +139,16 @@ public class JdbcChangeEventSink implements ChangeEventSink {
                 flushBuffer(tableId, toFlush);
             }
             else {
-
                 if (deleteBufferByTable.get(tableId) != null && !deleteBufferByTable.get(tableId).isEmpty()) {
                     // When an insert arrives, delete buffer must be flushed to avoid losing an insert for the same record after its deletion.
                     // this because at the end we will always flush inserts before deletes.
 
                     flushBuffer(tableId, deleteBufferByTable.get(tableId).flush());
+                }
+
+                if (prevColumnCountByTable.containsKey(tableId) && !Objects.equals(prevColumnCountByTable.get(tableId), sinkRecordDescriptor.getColumnNumber())) {
+                    // If the column count is different, we need to flush the buffer to address schema evolution
+                    flushBuffer(tableId, updateBufferByTable.get(tableId).flush());
                 }
 
                 Stopwatch updateBufferStopwatch = Stopwatch.reusable();
@@ -154,6 +163,7 @@ public class JdbcChangeEventSink implements ChangeEventSink {
                 flushBuffer(tableId, toFlush);
             }
 
+            prevColumnCountByTable.put(tableId, sinkRecordDescriptor.getColumnNumber());
         }
 
         flushBuffers(updateBufferByTable);
@@ -221,21 +231,25 @@ public class JdbcChangeEventSink implements ChangeEventSink {
                 tableChangesStopwatch.stop();
 
                 flushBufferStopwatch.start();
-                if (record_0.isDelete()) {
+
+                if (config.getInsertMode() == CSV) {
+                    String csvFilePath = "/tmp/" + UUID.randomUUID() + ".csv";
+                    List<String> updateStatement = getSqlStatements(table, toFlush.get(toFlush.size() - 1), csvFilePath);
+                    recordWriter.writeCSV(toFlush, updateStatement, csvFilePath);
+                }
+                else if (record_0.isDelete()) {
                     String deleteStatement = getSqlStatement(table, toFlush.get(0), true, bulkSize);
                     recordWriter.write(toFlush, deleteStatement, true);
                 }
-                else {
-                    if (config.getInsertMode() == INSERT) {
-                        String insertStatement = getSqlStatement(table, toFlush.get(0), false, bulkSize);
-                        recordWriter.write(toFlush, insertStatement, false);
-                    }
-                    else {
-                        String deleteStatement = getSqlStatement(table, toFlush.get(0), true, bulkSize);
-                        String insertStatement = getSqlStatement(table, toFlush.get(0), false, bulkSize);
-                        recordWriter.write(toFlush, deleteStatement, true);
-                        recordWriter.write(toFlush, insertStatement, false);
-                    }
+                else if (config.getInsertMode() == INSERT) {
+                    String insertStatement = getSqlStatement(table, toFlush.get(0), false, bulkSize);
+                    recordWriter.write(toFlush, insertStatement, false);
+                }
+                else if (config.getInsertMode() == UPSERT) {
+                    String deleteStatement = getSqlStatement(table, toFlush.get(0), true, bulkSize);
+                    String insertStatement = getSqlStatement(table, toFlush.get(0), false, bulkSize);
+                    recordWriter.write(toFlush, deleteStatement, true);
+                    recordWriter.write(toFlush, insertStatement, false);
                 }
                 flushBufferStopwatch.stop();
 
@@ -393,6 +407,20 @@ public class JdbcChangeEventSink implements ChangeEventSink {
         return readTable(tableId);
     }
 
+    private List<String> getSqlStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath) {
+        if (config.getInsertMode() != CSV) {
+            throw new DataException("Cannot get SQL statements for non-CSV mode");
+        }
+
+        if (record.isDelete()) {
+            return dialect.getCSVDeleteStatements(table, record, csvFilePath, record.getKeyFieldNames());
+        }
+        else {
+            return dialect.getCSVUpsertStatements(table, record, csvFilePath, record.getKeyFieldNames(), record.getNonKeyFieldNames());
+        }
+
+    }
+
     private String getSqlStatement(TableDescriptor table, SinkRecordDescriptor record, Boolean isDelete, int bulkSize) {
 
         if (!record.isDelete() && !isDelete) {
@@ -406,13 +434,13 @@ public class JdbcChangeEventSink implements ChangeEventSink {
                     return dialect.getUpsertStatement(table, record);
                 case UPDATE:
                     return dialect.getUpdateStatement(table, record);
+                default:
+                    throw new DataException(String.format("Unknown insert mode: %s", config.getInsertMode()));
             }
         }
         else {
             return dialect.getDeleteStatementBulk(table, record, bulkSize);
         }
-
-        throw new DataException(String.format("Unable to get SQL statement for %s", record));
     }
 
     private void writeTruncate(String sql) throws SQLException {

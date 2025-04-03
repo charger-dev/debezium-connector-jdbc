@@ -18,10 +18,16 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAccessor;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.apache.kafka.connect.data.Schema;
 import org.hibernate.SessionFactory;
@@ -53,6 +59,12 @@ import net.snowflake.hibernate.dialect.SnowflakeDialect;
 public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SnowflakeDatabaseDialect.class);
+    private static final String CSV_STAGE_NAME = "DART_STAGE";
+    public static final String CSV_NULL_LABEL = "_charger_null";
+    private static final String CHARGER_INTERNAL_SCHEMA = "CHARGER_INTERNAL";
+    private static final String COLUMN_CHARGER_RAW_ID = "_CHARGER_RAW_ID";
+    private static final String COLUMN_CHARGER_EXTRACTED_AT = "_CHARGER_EXTRACTED_AT";
+    private static final Map<TableId, DatabaseMetaData> tableMetadataCache = new ConcurrentHashMap<>();
 
     public static class SnowflakeDatabaseDialectProvider implements DatabaseDialectProvider {
         @Override
@@ -86,6 +98,16 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
     private String getSchemaName() {
         return getConfig().getConnectionSchema().toUpperCase();
+    }
+
+    private boolean tableExistsFromDatabase(Connection connection, TableId tableId) throws SQLException {
+        tableId = tableId.toUpperCase();
+        final DatabaseMetaData metadata = connection.getMetaData();
+        tableMetadataCache.put(tableId, metadata);
+
+        try (ResultSet rs = metadata.getTables(getDatabaseName(), getSchemaName(), tableId.getTableName().toUpperCase(), null)) {
+            return rs.next();
+        }
     }
 
     @Override
@@ -141,26 +163,42 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
     @Override
     public String getDeleteStatementBulk(TableDescriptor table, SinkRecordDescriptor record, int bulkSize) {
         final SqlStatementBuilder builder = new SqlStatementBuilder();
-        builder.append("DELETE FROM ");
-        builder.append(getQualifiedTableName(table.getId().toUpperCase()));
 
         List<String> keyFields = record.getKeyFieldNames();
-        if (!keyFields.isEmpty()) {
-            builder.append(" WHERE (");
-            builder.appendList(", ", keyFields, name -> columnNameFromField(name, record));
-            builder.append(") IN (");
+        if (keyFields.isEmpty()) {
+            throw new IllegalArgumentException("No key fields defined for delete.");
+        }
 
-            // Add parameter placeholders for each batch
-            for (int i = 0; i < bulkSize; i++) {
-                if (i > 0) {
-                    builder.append(", ");
-                }
-                builder.append("(");
-                builder.append(String.join(", ", Collections.nCopies(keyFields.size(), "?")));
-                builder.append(")");
+        String tableAlias = "t";
+        String tempAlias = "tmp";
+
+        builder.append("DELETE FROM ");
+        builder.append(getQualifiedTableName(table.getId().toUpperCase()));
+        builder.append(" ").append(tableAlias).append(" USING (");
+
+        builder.append("SELECT * FROM VALUES ");
+
+        for (int i = 0; i < bulkSize; i++) {
+            if (i > 0) {
+                builder.append(", ");
             }
-
+            builder.append("(");
+            builder.append(String.join(", ", Collections.nCopies(keyFields.size(), "?")));
             builder.append(")");
+        }
+
+        builder.append(") AS ").append(tempAlias).append(" (");
+        builder.appendList(", ", keyFields, name -> "\"" + name.toUpperCase() + "\"");
+        builder.append(") ");
+
+        builder.append("WHERE ");
+        for (int i = 0; i < keyFields.size(); i++) {
+            if (i > 0) {
+                builder.append(" AND ");
+            }
+            String field = "\"" + keyFields.get(i) + "\"";
+            builder.append(tableAlias).append(".").append(field.toUpperCase())
+                    .append(" = ").append(tempAlias).append(".").append(field.toUpperCase());
         }
 
         String sql = builder.build();
@@ -181,6 +219,58 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
         LOGGER.debug("Generated delete statement: {}", builder.build());
         return builder.build();
+    }
+
+    @Override
+    public List<String> getCSVDeleteStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath, List<String> keyFieldNames) {
+        String dbName = getDatabaseName();
+        String tableName = getQualifiedTableName(table.getId());
+        String fileName = csvFilePath.substring(csvFilePath.lastIndexOf("/") + 1);
+        String tempTableName = "TEMP_" + CHARGER_INTERNAL_SCHEMA + "_" + table.getId().getTableName().toUpperCase() + "_"
+                + UUID.randomUUID().toString().replace("-", "_");
+
+        List<String> quotedPkColumns = keyFieldNames.stream()
+                .map(col -> "\"" + col.toUpperCase() + "\"")
+                .collect(Collectors.toList());
+
+        String joinedPkColumns = String.join(", ", quotedPkColumns);
+
+        String whereClause = quotedPkColumns.stream()
+                .map(pk -> String.format("(t1.%s IS NOT DISTINCT FROM t2.%s)", pk, pk))
+                .collect(Collectors.joining(" AND "));
+
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("BEGIN;\n");
+        sb.append(String.format("CREATE SCHEMA IF NOT EXISTS \"%s\".%s;\n", dbName, CHARGER_INTERNAL_SCHEMA));
+        sb.append(String.format("USE SCHEMA \"%s\".%s;\n", dbName, CHARGER_INTERNAL_SCHEMA));
+        sb.append(String.format("CREATE STAGE IF NOT EXISTS \"%s\".%s.%s;\n", dbName, CHARGER_INTERNAL_SCHEMA, CSV_STAGE_NAME));
+        sb.append(String.format("PUT file://%s @%s PARALLEL = 8;\n", csvFilePath, CSV_STAGE_NAME));
+        sb.append(String.format(
+                "CREATE OR REPLACE TEMPORARY TABLE \"%s\".%s.\"%s\" LIKE \"%s\".%s;\n",
+                dbName, CHARGER_INTERNAL_SCHEMA, tempTableName,
+                dbName, tableName));
+        sb.append(String.format(
+                "COPY INTO \"%s\".%s.\"%s\" (%s) FROM @%s/%s FILE_FORMAT = (TYPE = 'CSV' FIELD_OPTIONALLY_ENCLOSED_BY = '\"' FIELD_DELIMITER = ',' EMPTY_FIELD_AS_NULL = FALSE SKIP_HEADER = 1);\n",
+                dbName, CHARGER_INTERNAL_SCHEMA, tempTableName, joinedPkColumns, CSV_STAGE_NAME, fileName));
+        sb.append(String.format("REMOVE @%s/%s;\n", CSV_STAGE_NAME, fileName));
+        sb.append(String.format(
+                "DELETE FROM \"%s\".%s AS t1\n" +
+                        "USING \"%s\".%s.\"%s\" AS t2\n" +
+                        "WHERE %s;\n",
+                dbName, tableName,
+                dbName, CHARGER_INTERNAL_SCHEMA, tempTableName,
+                whereClause));
+        sb.append("COMMIT;\n");
+
+        String[] statements = sb.toString().split(";");
+        List<String> sqlStatements = Arrays.stream(statements)
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .map(s -> s + ";")
+                .collect(Collectors.toList());
+
+        return sqlStatements;
     }
 
     @Override
@@ -217,6 +307,8 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
             return columnName + " " + columnType;
         });
 
+        builder.append(", \"" + COLUMN_CHARGER_EXTRACTED_AT + "\" TIMESTAMP_NTZ");
+        builder.append(", \"" + COLUMN_CHARGER_RAW_ID + "\" STRING");
         builder.append(")");
 
         return builder.build();
@@ -248,6 +340,67 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
         String sql = builder.build();
         LOGGER.debug("Generated Upsert SQL: {}", sql);
         return sql;
+    }
+
+    @Override
+    public List<String> getCSVUpsertStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath, List<String> keyFieldNames,
+                                               List<String> nonKeyFieldNames) {
+        String dbName = getDatabaseName();
+        String tableName = getQualifiedTableName(table.getId());
+        String fileName = csvFilePath.substring(csvFilePath.lastIndexOf("/") + 1);
+
+        List<String> quotedColumns = Stream.concat(keyFieldNames.stream(), nonKeyFieldNames.stream())
+                .map(col -> "\"" + col.toUpperCase() + "\"")
+                .collect(Collectors.toList());
+        List<String> quotedPkColumns = keyFieldNames.stream()
+                .map(col -> "\"" + col.toUpperCase() + "\"")
+                .collect(Collectors.toList());
+        String joinedColumns = String.join(", ", quotedColumns);
+        String partitionByClause = String.join(", ", quotedPkColumns);
+
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("BEGIN;\n");
+        sb.append(String.format("CREATE SCHEMA IF NOT EXISTS \"%s\".%s;\n", dbName, CHARGER_INTERNAL_SCHEMA));
+        sb.append(String.format("USE SCHEMA \"%s\".%s;\n", dbName, CHARGER_INTERNAL_SCHEMA));
+        sb.append(String.format("CREATE STAGE IF NOT EXISTS \"%s\".%s.%s;\n", dbName, CHARGER_INTERNAL_SCHEMA, CSV_STAGE_NAME));
+        sb.append(String.format("PUT file://%s @%s PARALLEL = 8;\n", csvFilePath, CSV_STAGE_NAME));
+
+        sb.append(String.format(
+                "COPY INTO \"%s\".%s (%s, %s, %s) FROM @%s/%s FILE_FORMAT = (TYPE = 'CSV' FIELD_OPTIONALLY_ENCLOSED_BY = '\"' FIELD_DELIMITER = ',' EMPTY_FIELD_AS_NULL = FALSE NULL_IF = ('%s') SKIP_HEADER = 1);\n",
+                dbName, tableName, joinedColumns, COLUMN_CHARGER_EXTRACTED_AT, COLUMN_CHARGER_RAW_ID, CSV_STAGE_NAME, fileName, CSV_NULL_LABEL));
+
+        sb.append(String.format("REMOVE @%s/%s;\n", CSV_STAGE_NAME, fileName));
+
+        sb.append(String.format(
+                "DELETE FROM \"%s\".%s\n" +
+                        "WHERE \"%s\" IN (\n" +
+                        "    SELECT \"%s\" FROM (\n" +
+                        "        SELECT \"%s\",\n" +
+                        "               ROW_NUMBER() OVER (PARTITION BY %s\n" +
+                        "                                ORDER BY \"%s\" DESC NULLS LAST, \"%s\" DESC) AS row_number\n" +
+                        "        FROM \"%s\".%s\n" +
+                        "    ) WHERE row_number != 1\n" +
+                        ");\n",
+                dbName, tableName,
+                COLUMN_CHARGER_RAW_ID,
+                COLUMN_CHARGER_RAW_ID,
+                COLUMN_CHARGER_RAW_ID,
+                partitionByClause,
+                COLUMN_CHARGER_EXTRACTED_AT, COLUMN_CHARGER_RAW_ID,
+                dbName, tableName));
+
+        sb.append("COMMIT;\n");
+
+        LOGGER.info("Generated Upsert CSV SQL: {}", sb);
+        String[] statements = sb.toString().split(";");
+        List<String> sqlStatements = Arrays.stream(statements)
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .map(s -> s + ";")
+                .collect(Collectors.toList());
+
+        return sqlStatements;
     }
 
     @Override

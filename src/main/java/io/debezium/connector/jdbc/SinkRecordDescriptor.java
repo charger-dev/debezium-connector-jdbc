@@ -49,8 +49,8 @@ public class SinkRecordDescriptor {
     private final boolean flattened;
     private static final Logger LOGGER = LoggerFactory.getLogger(SinkRecordDescriptor.class);
 
-    private SinkRecordDescriptor(SinkRecord record, String topicName, List<String> keyFieldNames, List<String> nonKeyFieldNames,
-                                 Map<String, FieldDescriptor> fields, boolean flattened) {
+    public SinkRecordDescriptor(SinkRecord record, String topicName, List<String> keyFieldNames, List<String> nonKeyFieldNames,
+                                Map<String, FieldDescriptor> fields, boolean flattened) {
         this.record = record;
         this.topicName = topicName;
         this.keyFieldNames = keyFieldNames;
@@ -81,6 +81,10 @@ public class SinkRecordDescriptor {
 
     public Map<String, FieldDescriptor> getFields() {
         return fields;
+    }
+
+    public Integer getColumnNumber() {
+        return keyFieldNames.size() + nonKeyFieldNames.size();
     }
 
     public boolean isDebeziumSinkRecord() {

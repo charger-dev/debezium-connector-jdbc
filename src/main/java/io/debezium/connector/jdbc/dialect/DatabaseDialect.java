@@ -159,6 +159,16 @@ public interface DatabaseDialect {
     String getUpsertStatement(TableDescriptor table, SinkRecordDescriptor record);
 
     /**
+     * Construct a {@code UPSERT} statement specific for this dialect.
+     *
+     * @param table the current relational table model, should not be {@code null}
+     * @param record the current sink record being processed, should not be {@code null}
+     * @return the upsert SQL statement to be executed, never {@code null}
+     */
+    List<String> getCSVUpsertStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath, List<String> keyFieldNames,
+                                        List<String> nonKeyFieldNames);
+
+    /**
      * Construct a {@code UPDATE} statement specific for this dialect.
      *
      * @param table the current relational table model, should not be {@code null}
@@ -175,6 +185,15 @@ public interface DatabaseDialect {
      * @return the delete SQL statement to be executed, never {@code null}
      */
     String getDeleteStatement(TableDescriptor table, SinkRecordDescriptor record);
+
+    /**
+     * Construct a {@code DELETE} statement specific for this dialect.
+     *
+     * @param table the current relational table model, should not be {@code null}
+     * @param record the current sink record being processed, should not be {@code null}
+     * @return the delete SQL statement to be executed, never {@code null}
+     */
+    List<String> getCSVDeleteStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath, List<String> keyFieldNames);
 
     /**
      * Construct a {@code DELETE} statement specific for this dialect.

@@ -5,21 +5,45 @@
  */
 package io.debezium.connector.jdbc;
 
+import static io.debezium.connector.jdbc.dialect.snowflake.SnowflakeDatabaseDialect.CSV_NULL_LABEL;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.StringReader;
+import java.security.PrivateKey;
+import java.security.Security;
 import java.sql.BatchUpdateException;
+import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Properties;
+import java.util.UUID;
 
 import org.apache.kafka.connect.data.Struct;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.hibernate.SharedSessionContract;
 import org.hibernate.Transaction;
 import org.hibernate.jdbc.Work;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.opencsv.CSVWriter;
+
 import io.debezium.connector.jdbc.dialect.DatabaseDialect;
 import io.debezium.util.Stopwatch;
+
+import net.snowflake.client.jdbc.internal.org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import net.snowflake.client.jdbc.internal.org.bouncycastle.openssl.PEMParser;
+import net.snowflake.client.jdbc.internal.org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+import net.snowflake.client.jdbc.internal.org.bouncycastle.openssl.jcajce.JceOpenSSLPKCS8DecryptorProviderBuilder;
+import net.snowflake.client.jdbc.internal.org.bouncycastle.operator.InputDecryptorProvider;
+import net.snowflake.client.jdbc.internal.org.bouncycastle.pkcs.PKCS8EncryptedPrivateKeyInfo;
 
 /**
  * Effectively writes the batches using Hibernate {@link Work}
@@ -39,6 +63,92 @@ public class RecordWriter {
         this.queryBinderResolver = queryBinderResolver;
         this.config = config;
         this.dialect = dialect;
+    }
+
+    private String getPrivateKeyPassphrase() {
+        return "";
+    }
+
+    private PrivateKey getPrivateKey(String privateKeyStr)
+            throws Exception {
+        String keyString = privateKeyStr
+                .replace("\\n", "\n")
+                .trim();
+
+        net.snowflake.client.jdbc.internal.org.bouncycastle.asn1.pkcs.PrivateKeyInfo privateKeyInfo = null;
+        Security.addProvider(new BouncyCastleProvider());
+        // Read an object from the private key file.
+        PEMParser pemParser = new PEMParser(new StringReader(keyString));
+        Object pemObject = pemParser.readObject();
+        if (pemObject instanceof PKCS8EncryptedPrivateKeyInfo) {
+            // Handle the case where the private key is encrypted.
+            PKCS8EncryptedPrivateKeyInfo encryptedPrivateKeyInfo = (PKCS8EncryptedPrivateKeyInfo) pemObject;
+            String passphrase = getPrivateKeyPassphrase();
+            InputDecryptorProvider pkcs8Prov = new JceOpenSSLPKCS8DecryptorProviderBuilder().build(passphrase.toCharArray());
+            privateKeyInfo = net.snowflake.client.jdbc.internal.org.bouncycastle.asn1.pkcs.PrivateKeyInfo
+                    .getInstance(encryptedPrivateKeyInfo.decryptPrivateKeyInfo(pkcs8Prov));
+        }
+        else if (pemObject instanceof net.snowflake.client.jdbc.internal.org.bouncycastle.asn1.pkcs.PrivateKeyInfo) {
+            // Handle the case where the private key is unencrypted.
+            privateKeyInfo = (PrivateKeyInfo) pemObject;
+        }
+        pemParser.close();
+        JcaPEMKeyConverter converter = new JcaPEMKeyConverter().setProvider(BouncyCastleProvider.PROVIDER_NAME);
+        return converter.getPrivateKey(net.snowflake.client.jdbc.internal.org.bouncycastle.asn1.pkcs.PrivateKeyInfo.getInstance(privateKeyInfo));
+    }
+
+    private void executeAllWithRawJdbc(List<String> sqlStatements) {
+        String jdbcUrl = config.getConnectionUrl();
+        String user = config.getConnectionUser();
+        String privateKeyStr = config.getConnectionPrivateKey();
+        String password = config.getConnectionPassword();
+
+        try {
+            Properties props = new Properties();
+            props.put("user", user);
+
+            if (privateKeyStr == null || privateKeyStr.isEmpty()) {
+                props.put("password", password);
+            }
+            else {
+                props.put("privateKey", getPrivateKey(privateKeyStr));
+            }
+
+            try (Connection conn = DriverManager.getConnection(jdbcUrl, props);
+                    Statement stmt = conn.createStatement()) {
+
+                conn.setAutoCommit(false);
+
+                for (String sql : sqlStatements) {
+                    if (sql != null && !sql.trim().isEmpty()) {
+                        LOGGER.info("Executing SQL: {}", sql);
+                        stmt.execute(sql.trim());
+                    }
+                }
+
+                conn.commit();
+
+            }
+            catch (Exception execErr) {
+                LOGGER.error("Execution failed, attempting rollback", execErr);
+                throw new RuntimeException("Failed to execute SQL statements via Snowflake", execErr);
+            }
+        }
+        catch (Exception e) {
+            LOGGER.error("Failed to connect to Snowflake", e);
+            throw new RuntimeException("Failed to connect to Snowflake", e);
+        }
+    }
+
+    public void writeCSV(List<SinkRecordDescriptor> records, List<String> sqlStatements, String csvFilePath) throws IOException {
+        Stopwatch writeStopwatch = Stopwatch.reusable();
+        writeRecordsToCsv(records, csvFilePath);
+        writeStopwatch.start();
+
+        executeAllWithRawJdbc(sqlStatements);
+
+        writeStopwatch.stop();
+        LOGGER.trace("[PERF] Total write execution time {}", writeStopwatch.durations());
     }
 
     public void write(List<SinkRecordDescriptor> records, String sqlStatement, Boolean isBulkDelete) {
@@ -106,6 +216,58 @@ public class RecordWriter {
                 LOGGER.trace("[PERF] Execute bulk delete execution time {}", executeStopwatch.durations());
             }
         };
+    }
+
+    public File writeRecordsToCsv(List<SinkRecordDescriptor> records, String csvFilePath) throws IOException {
+        File tempFile;
+        tempFile = new File(csvFilePath);
+
+        if (!tempFile.exists()) {
+            tempFile.getParentFile().mkdirs(); // Ensure the parent directories exist
+            tempFile.createNewFile(); // Actually creates the file
+        }
+
+        try (CSVWriter writer = new CSVWriter(new FileWriter(tempFile))) {
+            if (records.isEmpty()) {
+                return tempFile;
+            }
+
+            SinkRecordDescriptor last = records.get(records.size() - 1);
+            List<String> fieldNames = new ArrayList<>();
+            fieldNames.addAll(last.getKeyFieldNames());
+            fieldNames.addAll(last.getNonKeyFieldNames());
+
+            fieldNames.add("_CHARGER_EXTRACTED_AT");
+            fieldNames.add("_CHARGER_RAW_ID");
+
+            writer.writeNext(fieldNames.toArray(new String[0]));
+
+            for (SinkRecordDescriptor record : records) {
+                List<String> row = new ArrayList<>();
+
+                final Struct keySource = record.getKeyStruct(config.getPrimaryKeyMode());
+                for (String fieldName : record.getKeyFieldNames()) {
+                    Object value = keySource.getWithoutDefault(fieldName);
+                    row.add(value == null ? CSV_NULL_LABEL : value.toString());
+                }
+
+                final Struct source = record.getAfterStruct();
+                for (String fieldName : record.getNonKeyFieldNames()) {
+                    Object value = source.getWithoutDefault(fieldName);
+                    row.add(value == null ? CSV_NULL_LABEL : value.toString());
+                }
+
+                row.add(Instant.now().toString());
+                row.add(UUID.randomUUID().toString());
+
+                writer.writeNext(row.toArray(new String[0]));
+            }
+        }
+        catch (IOException e) {
+            throw new RuntimeException("Failed to write CSV file", e);
+        }
+
+        return tempFile;
     }
 
     private Work processBatch(List<SinkRecordDescriptor> records, String sqlStatement) {

@@ -6,7 +6,13 @@
 package io.debezium.connector.jdbc.integration;
 
 import static org.fest.assertions.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +28,8 @@ import io.debezium.connector.jdbc.JdbcSinkConnectorConfig;
 import io.debezium.connector.jdbc.JdbcSinkConnectorConfig.InsertMode;
 import io.debezium.connector.jdbc.JdbcSinkConnectorConfig.PrimaryKeyMode;
 import io.debezium.connector.jdbc.JdbcSinkConnectorConfig.SchemaEvolutionMode;
+import io.debezium.connector.jdbc.RecordWriter;
+import io.debezium.connector.jdbc.SinkRecordDescriptor;
 import io.debezium.connector.jdbc.junit.TestHelper;
 import io.debezium.connector.jdbc.junit.jupiter.Sink;
 import io.debezium.connector.jdbc.junit.jupiter.SinkRecordFactoryArgumentsProvider;
@@ -67,6 +75,46 @@ public abstract class AbstractJdbcSinkInsertModeTest extends AbstractJdbcSinkTes
         getSink().assertColumnType(tableAssert, "id", ValueType.NUMBER, (byte) 1, (byte) 1);
         getSink().assertColumnType(tableAssert, "name", ValueType.TEXT, "John Doe", "John Doe");
         getSink().assertColumnType(tableAssert, "nick_name$", ValueType.TEXT, "John Doe$", "John Doe$");
+    }
+
+    @ParameterizedTest
+    @ArgumentsSource(SinkRecordFactoryArgumentsProvider.class)
+    public void testInsertModeCSVWithNoPrimaryKey(SinkRecordFactory factory) throws IOException {
+        final Map<String, String> properties = getDefaultSinkConfig();
+        properties.put(JdbcSinkConnectorConfig.SCHEMA_EVOLUTION, SchemaEvolutionMode.BASIC.getValue());
+        properties.put(JdbcSinkConnectorConfig.PRIMARY_KEY_MODE, PrimaryKeyMode.RECORD_KEY.getValue());
+        properties.put(JdbcSinkConnectorConfig.INSERT_MODE, InsertMode.CSV.getValue());
+        properties.put(JdbcSinkConnectorConfig.CONNECTION_SCHEMA, "TEST_SCHEMA");
+        properties.put(JdbcSinkConnectorConfig.CONNECTION_DATABASE, "TEST_DB");
+
+        startSinkConnector(properties);
+        assertSinkConnectorIsRunning();
+
+        final String tableName = randomTableName();
+        final String topicName = topicName("server1", "schema", tableName);
+
+        final SinkRecord createRecord = factory.createRecordMultipleKeyColumns(topicName);
+        final JdbcSinkConnectorConfig config = new JdbcSinkConnectorConfig(properties);
+
+        RecordWriter recordWriter = new RecordWriter(null, null, config, null);
+        SinkRecordDescriptor sinkRecordDescriptor = new SinkRecordDescriptor(createRecord, topicName, List.of("id1", "id2"), List.of("name"), null, false);
+        List<SinkRecordDescriptor> recordList = new ArrayList<SinkRecordDescriptor>();
+        recordList.add(sinkRecordDescriptor);
+        File csvFile = recordWriter.writeRecordsToCsv(recordList, "/tmp/test.csv");
+        List<String> lines = Files.readAllLines(csvFile.toPath());
+
+        assertFalse(lines.isEmpty(), "CSV file should not be empty");
+
+        String header = lines.get(0);
+        String dataLine = lines.get(1);
+
+        assertTrue(header.contains("id1"));
+        assertTrue(header.contains("id2"));
+        assertTrue(header.contains("name"));
+
+        assertTrue(dataLine.contains("1"));
+        assertTrue(dataLine.contains("10"));
+        assertTrue(dataLine.contains("John Doe")); // UUID check
     }
 
     @ParameterizedTest

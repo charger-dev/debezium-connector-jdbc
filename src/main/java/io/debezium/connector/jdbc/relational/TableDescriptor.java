@@ -54,6 +54,10 @@ public class TableDescriptor {
         return columns.values();
     }
 
+    public List<String> getColumnNames() {
+        return new ArrayList<>(columns.keySet());
+    }
+
     public ColumnDescriptor getColumnByName(String columnName) {
         final ColumnDescriptor column = columns.get(columnName);
         if (column == null) {
@@ -72,7 +76,10 @@ public class TableDescriptor {
     }
 
     public List<String> getPrimaryKeyColumnNames() {
-        return primaryKeyColumnNames;
+        return columns.values().stream()
+                .map(ColumnDescriptor::getColumnName)
+                .filter(primaryKeyColumnNames::contains)
+                .collect(Collectors.toList());
     }
 
     public Collection<ColumnDescriptor> getPrimaryKeyColumns() {

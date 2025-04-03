@@ -376,6 +376,12 @@ public class GeneralDatabaseDialect implements DatabaseDialect {
     }
 
     @Override
+    public List<String> getCSVUpsertStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath, List<String> keyFieldNames,
+                                               List<String> nonKeyFieldNames) {
+        throw new UnsupportedOperationException("Upsert configurations are not supported for this dialect");
+    }
+
+    @Override
     public String getUpdateStatement(TableDescriptor table, SinkRecordDescriptor record) {
         final SqlStatementBuilder builder = new SqlStatementBuilder();
         builder.append("UPDATE ");
@@ -403,6 +409,11 @@ public class GeneralDatabaseDialect implements DatabaseDialect {
         }
 
         return builder.build();
+    }
+
+    @Override
+    public List<String> getCSVDeleteStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath, List<String> keyFieldNames) {
+        throw new UnsupportedOperationException("Delete configurations are not supported for this dialect");
     }
 
     @Override

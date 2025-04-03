@@ -9,6 +9,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 import org.apache.kafka.common.config.ConfigDef;
@@ -168,7 +169,7 @@ public class JdbcSinkConnectorConfig {
             .withDescription("Connection pool timeout");
 
     public static final Field CONNECTION_PRIVATE_KEY_FIELD = Field.create(CONNECTION_PRIVATE_KEY)
-            .withDisplayName("Password")
+            .withDisplayName("Private key")
             .withType(Type.STRING)
             .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 8))
             .withWidth(ConfigDef.Width.LONG)
@@ -402,7 +403,12 @@ public class JdbcSinkConnectorConfig {
         /**
          * Events that create or change data are treated using standard SQL update semantics.
          */
-        UPDATE("update");
+        UPDATE("update"),
+
+        /**
+         * Events that create or change data are treated using CSV upload.
+         */
+        CSV("csv");
 
         private String mode;
 
@@ -550,6 +556,7 @@ public class JdbcSinkConnectorConfig {
     private final String postgresPostgisSchema;
     private final boolean sqlServerIdentityInsert;
     private FieldNameFilter fieldsFilter;
+    private String connectionPrivateKey;
 
     private final long batchSize;
 
@@ -558,6 +565,7 @@ public class JdbcSinkConnectorConfig {
     public JdbcSinkConnectorConfig(Map<String, String> props) {
         config = Configuration.from(props);
         this.insertMode = InsertMode.parse(config.getString(INSERT_MODE));
+        this.connectionPrivateKey = config.getString(CONNECTION_PRIVATE_KEY_FIELD);
         this.deleteEnabled = config.getBoolean(DELETE_ENABLED_FIELD);
         this.truncateEnabled = config.getBoolean(TRUNCATE_ENABLED_FIELD);
         this.tableNameFormat = config.getString(TABLE_NAME_FORMAT_FIELD);
@@ -684,8 +692,9 @@ public class JdbcSinkConnectorConfig {
         String url = config.getString(CONNECTION_URL_FIELD);
         if (config.hasKey(CONNECTION_PRIVATE_KEY_FIELD)) {
             String privateKeyContent = config.getString(CONNECTION_PRIVATE_KEY_FIELD);
+            String privateKeyPath = PRIVATE_KEY_PATH + UUID.randomUUID();
 
-            try (FileWriter writer = new FileWriter(PRIVATE_KEY_PATH)) {
+            try (FileWriter writer = new FileWriter(privateKeyPath)) {
                 writer.write(privateKeyContent);
                 writer.flush();
             }
@@ -694,9 +703,8 @@ public class JdbcSinkConnectorConfig {
                 throw new RuntimeException("Failed to write private key to file", e);
             }
 
-            String privateKeyParam = "&private_key_file=" + PRIVATE_KEY_PATH;
+            String privateKeyParam = "&private_key_file=" + privateKeyPath;
             url = url.contains("?") ? url + privateKeyParam : url + "?" + privateKeyParam;
-            LOGGER.info("url with private key: {}", url);
         }
 
         hibernateConfig.setProperty(AvailableSettings.CONNECTION_PROVIDER, config.getString(CONNECTION_PROVIDER_FIELD));
@@ -734,6 +742,22 @@ public class JdbcSinkConnectorConfig {
 
     public String getConnectionDatabase() {
         return config.getString(CONNECTION_DATABASE_FIELD);
+    }
+
+    public String getConnectionUrl() {
+        return config.getString(CONNECTION_URL_FIELD);
+    }
+
+    public String getConnectionUser() {
+        return config.getString(CONNECTION_USER_FIELD);
+    }
+
+    public String getConnectionPrivateKey() {
+        return connectionPrivateKey;
+    }
+
+    public String getConnectionPassword() {
+        return config.getString(CONNECTION_PASSWORD_FIELD);
     }
 
     public String getConnectionSchema() {

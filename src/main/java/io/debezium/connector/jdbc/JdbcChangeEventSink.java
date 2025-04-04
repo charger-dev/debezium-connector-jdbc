@@ -23,6 +23,7 @@ import java.util.UUID;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.sink.SinkRecord;
+import org.hibernate.SessionFactory;
 import org.hibernate.StatelessSession;
 import org.hibernate.Transaction;
 import org.hibernate.dialect.DatabaseVersion;
@@ -51,19 +52,42 @@ public class JdbcChangeEventSink implements ChangeEventSink {
     public static final String DETECT_SCHEMA_CHANGE_RECORD_MSG = "Schema change records are not supported by JDBC connector. Adjust `topics` or `topics.regex` to exclude schema change topic.";
     private final JdbcSinkConnectorConfig config;
     private final DatabaseDialect dialect;
-    private final StatelessSession session;
+    private final SessionFactory sessionFactory;
     private final TableNamingStrategy tableNamingStrategy;
     private final RecordWriter recordWriter;
 
-    public JdbcChangeEventSink(JdbcSinkConnectorConfig config, StatelessSession session, DatabaseDialect dialect, RecordWriter recordWriter) {
+    public JdbcChangeEventSink(JdbcSinkConnectorConfig config, SessionFactory sessionFactory, DatabaseDialect dialect, RecordWriter recordWriter) {
 
         this.config = config;
         this.tableNamingStrategy = config.getTableNamingStrategy();
         this.dialect = dialect;
-        this.session = session;
+        this.sessionFactory = sessionFactory;
         this.recordWriter = recordWriter;
         final DatabaseVersion version = this.dialect.getVersion();
         LOGGER.info("Database version {}.{}.{}", version.getMajor(), version.getMinor(), version.getMicro());
+    }
+
+    private StatelessSession openSessionWithRetry() {
+        final int maxRetries = 5;
+        final long retryDelayMillis = 2000;
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                return sessionFactory.openStatelessSession();
+            }
+            catch (Exception e) {
+                LOGGER.error("Failed to open StatelessSession, attempt {} of {}", attempt, maxRetries, e);
+
+                try {
+                    Thread.sleep(retryDelayMillis);
+                }
+                catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
+
+        throw new RuntimeException("Failed to open StatelessSession after retries.");
     }
 
     @Override
@@ -274,13 +298,6 @@ public class JdbcChangeEventSink implements ChangeEventSink {
 
     @Override
     public void close() {
-        if (session != null && session.isOpen()) {
-            LOGGER.info("Closing session.");
-            session.close();
-        }
-        else {
-            LOGGER.info("Session already closed.");
-        }
     }
 
     private TableDescriptor checkAndApplyTableChangesIfNeeded(TableId tableId, SinkRecordDescriptor descriptor) throws SQLException {
@@ -322,11 +339,15 @@ public class JdbcChangeEventSink implements ChangeEventSink {
     }
 
     private boolean hasTable(TableId tableId) {
-        return session.doReturningWork((connection) -> dialect.tableExists(connection, tableId));
+        try (StatelessSession session = openSessionWithRetry()) {
+            return session.doReturningWork((connection) -> dialect.tableExists(connection, tableId));
+        }
     }
 
     private TableDescriptor readTable(TableId tableId) {
-        return session.doReturningWork((connection) -> dialect.readTable(connection, tableId));
+        try (StatelessSession session = openSessionWithRetry()) {
+            return session.doReturningWork((connection) -> dialect.readTable(connection, tableId));
+        }
     }
 
     private TableDescriptor createTable(TableId tableId, SinkRecordDescriptor record) throws SQLException {
@@ -336,17 +357,18 @@ public class JdbcChangeEventSink implements ChangeEventSink {
             LOGGER.warn("Table '{}' cannot be created because schema evolution is disabled.", tableId.toFullIdentiferString());
             throw new SQLException("Cannot create table " + tableId.toFullIdentiferString() + " because schema evolution is disabled");
         }
-
-        Transaction transaction = session.beginTransaction();
-        try {
-            final String createSql = dialect.getCreateTableStatement(record, tableId);
-            LOGGER.trace("SQL: {}", createSql);
-            session.createNativeQuery(createSql, Object.class).executeUpdate();
-            transaction.commit();
-        }
-        catch (Exception e) {
-            transaction.rollback();
-            throw e;
+        try (StatelessSession session = openSessionWithRetry()) {
+            Transaction transaction = session.beginTransaction();
+            try {
+                final String createSql = dialect.getCreateTableStatement(record, tableId);
+                LOGGER.trace("SQL: {}", createSql);
+                session.createNativeQuery(createSql, Object.class).executeUpdate();
+                transaction.commit();
+            }
+            catch (Exception e) {
+                transaction.rollback();
+                throw e;
+            }
         }
 
         return readTable(tableId);
@@ -355,15 +377,17 @@ public class JdbcChangeEventSink implements ChangeEventSink {
     private void createSchema(String schema) throws SQLException {
         LOGGER.debug("Attempting to create schema '{}'.", schema);
 
-        Transaction transaction = session.beginTransaction();
-        try {
-            final String createSql = dialect.getCreateSchemaStatement(schema);
-            session.createNativeQuery(createSql, Object.class).executeUpdate();
-            transaction.commit();
-        }
-        catch (Exception e) {
-            transaction.rollback();
-            throw e;
+        try (StatelessSession session = openSessionWithRetry()) {
+            Transaction transaction = session.beginTransaction();
+            try {
+                final String createSql = dialect.getCreateSchemaStatement(schema);
+                session.createNativeQuery(createSql, Object.class).executeUpdate();
+                transaction.commit();
+            }
+            catch (Exception e) {
+                transaction.rollback();
+                throw e;
+            }
         }
     }
 
@@ -392,16 +416,18 @@ public class JdbcChangeEventSink implements ChangeEventSink {
             throw new SQLException("Cannot alter table " + tableId.toFullIdentiferString() + " because schema evolution is disabled");
         }
 
-        Transaction transaction = session.beginTransaction();
-        try {
-            final String alterSql = dialect.getAlterTableStatement(table, record, missingFields);
-            LOGGER.trace("SQL: {}", alterSql);
-            session.createNativeQuery(alterSql, Object.class).executeUpdate();
-            transaction.commit();
-        }
-        catch (Exception e) {
-            transaction.rollback();
-            throw e;
+        try (StatelessSession session = openSessionWithRetry()) {
+            Transaction transaction = session.beginTransaction();
+            try {
+                final String alterSql = dialect.getAlterTableStatement(table, record, missingFields);
+                LOGGER.trace("SQL: {}", alterSql);
+                session.createNativeQuery(alterSql, Object.class).executeUpdate();
+                transaction.commit();
+            }
+            catch (Exception e) {
+                transaction.rollback();
+                throw e;
+            }
         }
 
         return readTable(tableId);
@@ -444,18 +470,19 @@ public class JdbcChangeEventSink implements ChangeEventSink {
     }
 
     private void writeTruncate(String sql) throws SQLException {
+        try (StatelessSession session = openSessionWithRetry()) {
+            final Transaction transaction = session.beginTransaction();
+            try {
+                LOGGER.trace("SQL: {}", sql);
+                final NativeQuery<?> query = session.createNativeQuery(sql, Object.class);
 
-        final Transaction transaction = session.beginTransaction();
-        try {
-            LOGGER.trace("SQL: {}", sql);
-            final NativeQuery<?> query = session.createNativeQuery(sql, Object.class);
-
-            query.executeUpdate();
-            transaction.commit();
-        }
-        catch (Exception e) {
-            transaction.rollback();
-            throw e;
+                query.executeUpdate();
+                transaction.commit();
+            }
+            catch (Exception e) {
+                transaction.rollback();
+                throw e;
+            }
         }
     }
 }

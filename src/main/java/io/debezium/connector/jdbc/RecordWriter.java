@@ -27,7 +27,8 @@ import java.util.UUID;
 
 import org.apache.kafka.connect.data.Struct;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.hibernate.SharedSessionContract;
+import org.hibernate.SessionFactory;
+import org.hibernate.StatelessSession;
 import org.hibernate.Transaction;
 import org.hibernate.jdbc.Work;
 import org.slf4j.Logger;
@@ -53,16 +54,39 @@ import net.snowflake.client.jdbc.internal.org.bouncycastle.pkcs.PKCS8EncryptedPr
 public class RecordWriter {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RecordWriter.class);
-    private final SharedSessionContract session;
+    private final SessionFactory sessionFactory;
     private final QueryBinderResolver queryBinderResolver;
     private final JdbcSinkConnectorConfig config;
     private final DatabaseDialect dialect;
 
-    public RecordWriter(SharedSessionContract session, QueryBinderResolver queryBinderResolver, JdbcSinkConnectorConfig config, DatabaseDialect dialect) {
-        this.session = session;
+    public RecordWriter(SessionFactory sessionFactory, QueryBinderResolver queryBinderResolver, JdbcSinkConnectorConfig config, DatabaseDialect dialect) {
+        this.sessionFactory = sessionFactory;
         this.queryBinderResolver = queryBinderResolver;
         this.config = config;
         this.dialect = dialect;
+    }
+
+    private StatelessSession openSessionWithRetry() {
+        final int maxRetries = 5;
+        final long retryDelayMillis = 2000;
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                return sessionFactory.openStatelessSession();
+            }
+            catch (Exception e) {
+                LOGGER.error("Failed to open StatelessSession, attempt {} of {}", attempt, maxRetries, e);
+
+                try {
+                    Thread.sleep(retryDelayMillis);
+                }
+                catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
+
+        throw new RuntimeException("Failed to open StatelessSession after retries.");
     }
 
     private String getPrivateKeyPassphrase() {
@@ -152,26 +176,52 @@ public class RecordWriter {
     }
 
     public void write(List<SinkRecordDescriptor> records, String sqlStatement, Boolean isBulkDelete) {
+        final int maxRetries = 3;
+        final long retryDelayMillis = 2000;
 
-        Stopwatch writeStopwatch = Stopwatch.reusable();
-        writeStopwatch.start();
-        final Transaction transaction = session.beginTransaction();
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            Stopwatch writeStopwatch = Stopwatch.reusable();
+            writeStopwatch.start();
 
-        try {
-            if (isBulkDelete) {
-                session.doWork(processBulkDelete(records, sqlStatement));
+            try (StatelessSession session = openSessionWithRetry()) {
+                final Transaction transaction = session.beginTransaction();
+
+                try {
+                    if (isBulkDelete) {
+                        session.doWork(processBulkDelete(records, sqlStatement));
+                    }
+                    else {
+                        session.doWork(processBatch(records, sqlStatement));
+                    }
+                    transaction.commit();
+                }
+                catch (Exception e) {
+                    transaction.rollback();
+                    throw e;
+                }
+
+                writeStopwatch.stop();
+                LOGGER.trace("[PERF] Total write execution time {}", writeStopwatch.durations());
+                return;
+
             }
-            else {
-                session.doWork(processBatch(records, sqlStatement));
+            catch (Exception e) {
+                LOGGER.warn("Attempt {} of {} failed to write records: {}", attempt, maxRetries, e.getMessage());
+
+                if (attempt >= maxRetries) {
+                    LOGGER.error("All retry attempts failed. Giving up.");
+                    throw new RuntimeException("Failed to write records after retries", e);
+                }
+
+                try {
+                    Thread.sleep(retryDelayMillis);
+                }
+                catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Retry interrupted", ie);
+                }
             }
-            transaction.commit();
         }
-        catch (Exception e) {
-            transaction.rollback();
-            throw e;
-        }
-        writeStopwatch.stop();
-        LOGGER.trace("[PERF] Total write execution time {}", writeStopwatch.durations());
     }
 
     private Work processBulkDelete(List<SinkRecordDescriptor> records, String sqlStatement) {

@@ -18,7 +18,6 @@ import org.apache.kafka.connect.runtime.InternalSinkRecord;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
 import org.hibernate.SessionFactory;
-import org.hibernate.StatelessSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -73,12 +72,11 @@ public class JdbcSinkConnectorTask extends SinkTask {
             config.validate();
 
             sessionFactory = config.getHibernateConfiguration().buildSessionFactory();
-            StatelessSession session = sessionFactory.openStatelessSession();
             DatabaseDialect databaseDialect = DatabaseDialectResolver.resolve(config, sessionFactory);
             QueryBinderResolver queryBinderResolver = new QueryBinderResolver();
-            RecordWriter recordWriter = new RecordWriter(session, queryBinderResolver, config, databaseDialect);
+            RecordWriter recordWriter = new RecordWriter(sessionFactory, queryBinderResolver, config, databaseDialect);
 
-            changeEventSink = new JdbcChangeEventSink(config, session, databaseDialect, recordWriter);
+            changeEventSink = new JdbcChangeEventSink(config, sessionFactory, databaseDialect, recordWriter);
         }
         finally {
             stateLock.unlock();

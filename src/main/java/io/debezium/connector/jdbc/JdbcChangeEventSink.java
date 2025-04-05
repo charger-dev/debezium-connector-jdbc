@@ -10,6 +10,9 @@ import static io.debezium.connector.jdbc.JdbcSinkConnectorConfig.InsertMode.INSE
 import static io.debezium.connector.jdbc.JdbcSinkConnectorConfig.InsertMode.UPSERT;
 import static io.debezium.connector.jdbc.JdbcSinkConnectorConfig.SchemaEvolutionMode.NONE;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.sql.SQLException;
 import java.util.Collection;
 import java.util.HashMap;
@@ -259,7 +262,17 @@ public class JdbcChangeEventSink implements ChangeEventSink {
                 if (config.getInsertMode() == CSV) {
                     String csvFilePath = "/tmp/" + UUID.randomUUID() + ".csv";
                     List<String> updateStatement = getSqlStatements(table, toFlush.get(toFlush.size() - 1), csvFilePath);
-                    recordWriter.writeCSV(toFlush, updateStatement, csvFilePath);
+                    try {
+                        recordWriter.writeCSV(toFlush, updateStatement, csvFilePath);
+                    }
+                    finally {
+                        try {
+                            Files.deleteIfExists(Paths.get(csvFilePath));
+                        }
+                        catch (IOException e) {
+                            LOGGER.error("Failed to delete temporary CSV file {}", csvFilePath, e);
+                        }
+                    }
                 }
                 else if (record_0.isDelete()) {
                     String deleteStatement = getSqlStatement(table, toFlush.get(0), true, bulkSize);

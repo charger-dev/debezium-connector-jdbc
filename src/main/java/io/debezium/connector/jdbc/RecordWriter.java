@@ -19,12 +19,22 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.UUID;
 
+import org.apache.kafka.connect.data.Field;
+import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.hibernate.SessionFactory;
@@ -268,6 +278,51 @@ public class RecordWriter {
         };
     }
 
+    private String formatForCsv(String fieldName, Object value, Schema schema) {
+        String schemaName = schema.name();
+
+        if ("io.debezium.time.Date".equals(schemaName)) {
+            int days = (Integer) value;
+            LocalDate date = LocalDate.ofEpochDay(days);
+            return date.toString();
+        }
+        else if ("io.debezium.time.Timestamp".equals(schemaName)) {
+            Instant instant = Instant.ofEpochMilli(((Number) value).longValue());
+            return instant.atOffset(ZoneOffset.UTC)
+                    .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        }
+        else if ("io.debezium.time.MicroTimestamp".equals(schemaName)) {
+            long micros = ((Number) value).longValue();
+            Instant instant = Instant.ofEpochMilli(micros / 1000);
+            return instant.atOffset(ZoneOffset.UTC)
+                    .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        }
+        else if ("io.debezium.time.Time".equals(schemaName)) {
+            long millis = ((Number) value).longValue();
+            LocalTime time = LocalTime.ofNanoOfDay(millis * 1_000_000);
+            return time.toString();
+        }
+
+        if (value instanceof java.time.ZonedDateTime) {
+            return ((ZonedDateTime) value).format(DateTimeFormatter.ISO_ZONED_DATE_TIME);
+        }
+        else if (value instanceof java.time.OffsetDateTime) {
+            return ((OffsetDateTime) value).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        }
+        else if (value instanceof java.time.LocalDateTime) {
+            return ((LocalDateTime) value).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        }
+        else if (value instanceof java.time.LocalDate) {
+            return value.toString();
+        }
+        else if (value instanceof java.util.Date) {
+            return DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(
+                    ((Date) value).toInstant().atOffset(ZoneOffset.UTC));
+        }
+
+        return value.toString();
+    }
+
     public File writeRecordsToCsv(List<SinkRecordDescriptor> records, String csvFilePath) throws IOException {
         File tempFile;
         tempFile = new File(csvFilePath);
@@ -297,14 +352,19 @@ public class RecordWriter {
 
                 final Struct keySource = record.getKeyStruct(config.getPrimaryKeyMode());
                 for (String fieldName : record.getKeyFieldNames()) {
+                    final Struct source = record.getAfterStruct();
+                    Field field = source.schema().field(fieldName);
+                    Schema schema = field.schema();
                     Object value = keySource.getWithoutDefault(fieldName);
-                    row.add(value == null ? CSV_NULL_LABEL : value.toString());
+                    row.add(value == null ? CSV_NULL_LABEL : formatForCsv(fieldName, value, schema));
                 }
 
-                final Struct source = record.getAfterStruct();
                 for (String fieldName : record.getNonKeyFieldNames()) {
+                    final Struct source = record.getAfterStruct();
+                    Field field = source.schema().field(fieldName);
+                    Schema schema = field.schema();
                     Object value = source.getWithoutDefault(fieldName);
-                    row.add(value == null ? CSV_NULL_LABEL : value.toString());
+                    row.add(value == null ? CSV_NULL_LABEL : formatForCsv(fieldName, value, schema));
                 }
 
                 row.add(Instant.now().toString());

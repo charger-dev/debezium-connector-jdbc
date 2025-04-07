@@ -352,11 +352,8 @@ public class RecordWriter {
 
                 final Struct keySource = record.getKeyStruct(config.getPrimaryKeyMode());
                 for (String fieldName : record.getKeyFieldNames()) {
-                    final Struct source = record.getAfterStruct();
-                    Field field = source.schema().field(fieldName);
-                    Schema schema = field.schema();
                     Object value = keySource.getWithoutDefault(fieldName);
-                    row.add(value == null ? CSV_NULL_LABEL : formatForCsv(fieldName, value, schema));
+                    row.add(value == null ? CSV_NULL_LABEL : value.toString());
                 }
 
                 for (String fieldName : record.getNonKeyFieldNames()) {

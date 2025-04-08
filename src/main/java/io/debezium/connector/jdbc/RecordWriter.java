@@ -297,9 +297,31 @@ public class RecordWriter {
             return instant.atOffset(ZoneOffset.UTC)
                     .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
         }
-        else if ("io.debezium.time.Time".equals(schemaName)) {
-            long millis = ((Number) value).longValue();
-            LocalTime time = LocalTime.ofNanoOfDay(millis * 1_000_000);
+        else if ("io.debezium.time.Time".equals(schemaName) ||
+                "io.debezium.time.MicroTime".equals(schemaName) ||
+                "io.debezium.time.NanoTime".equals(schemaName)) {
+            long factor;
+
+            switch (schemaName) {
+                case "io.debezium.time.Time": // millis → nanos
+                    factor = 1_000_000L;
+                    break;
+                case "io.debezium.time.MicroTime": // micros → nanos
+                    factor = 1_000L;
+                    break;
+                default: // nanos → nanos
+                    factor = 1L;
+                    break;
+            }
+
+            long nanos = ((Number) value).longValue() * factor;
+
+            final long MAX_NANOS_PER_DAY = 86_399_999_999_999L;
+            if (nanos >= 86_400_000_000_000L) {
+                nanos = MAX_NANOS_PER_DAY;
+            }
+
+            LocalTime time = LocalTime.ofNanoOfDay(nanos);
             return time.toString();
         }
 

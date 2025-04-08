@@ -290,7 +290,7 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
     @Override
     public String getCreateSchemaStatement(String schema) {
-        return "CREATE SCHEMA IF NOT EXISTS " + getSchemaName();
+        return "CREATE SCHEMA IF NOT EXISTS \"" + getSchemaName() + "\"";
     }
 
     @Override

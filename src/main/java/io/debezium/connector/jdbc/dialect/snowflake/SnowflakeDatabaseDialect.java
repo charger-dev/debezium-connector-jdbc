@@ -392,7 +392,7 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
         sb.append("COMMIT;\n");
 
-        LOGGER.info("Generated Upsert CSV SQL: {}", sb);
+        LOGGER.debug("Generated Upsert CSV SQL: {}", sb);
         String[] statements = sb.toString().split(";");
         List<String> sqlStatements = Arrays.stream(statements)
                 .map(String::trim)

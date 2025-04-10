@@ -155,7 +155,7 @@ public class JdbcChangeEventSink implements ChangeEventSink {
                 if (updateBufferByTable.get(tableId) != null && !updateBufferByTable.get(tableId).isEmpty()) {
                     // When an delete arrives, update buffer must be flushed to avoid losing an
                     // delete for the same record after its update.
-
+                    LOGGER.info("Flushing update buffer for table {} because a delete arrived", tableId.getTableName());
                     flushBuffer(tableId, updateBufferByTable.get(tableId).flush());
                 }
 
@@ -175,6 +175,8 @@ public class JdbcChangeEventSink implements ChangeEventSink {
 
                 if (prevColumnCountByTable.containsKey(tableId) && !Objects.equals(prevColumnCountByTable.get(tableId), sinkRecordDescriptor.getColumnNumber())) {
                     // If the column count is different, we need to flush the buffer to address schema evolution
+                    LOGGER.info("Column count changed for table {}. Flushing buffer.",
+                            tableId.getTableName() + " " + sinkRecordDescriptor.getColumnNumber() + " " + prevColumnCountByTable.get(tableId));
                     flushBuffer(tableId, updateBufferByTable.get(tableId).flush());
                 }
 
@@ -194,7 +196,6 @@ public class JdbcChangeEventSink implements ChangeEventSink {
         }
 
         flushBuffers(updateBufferByTable);
-
         flushBuffers(deleteBufferByTable);
     }
 

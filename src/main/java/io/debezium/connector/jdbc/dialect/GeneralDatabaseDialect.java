@@ -28,7 +28,6 @@ import java.util.Set;
 
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
-import org.apache.kafka.connect.errors.ConnectException;
 import org.hibernate.SessionFactory;
 import org.hibernate.StatelessSession;
 import org.hibernate.boot.model.naming.Identifier;
@@ -502,7 +501,7 @@ public class GeneralDatabaseDialect implements DatabaseDialect {
             return type;
         }
 
-        throw new ConnectException(String.format("Failed to resolve column type for schema: %s (%s)", schema.type(), schema.name()));
+        return typeRegistry.get("TEXT");
     }
 
     @Override

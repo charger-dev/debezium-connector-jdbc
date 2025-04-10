@@ -77,6 +77,7 @@ public class JdbcSinkConnectorConfig {
     public static final String FIELD_INCLUDE_LIST = "field.include.list";
     public static final String FIELD_EXCLUDE_LIST = "field.exclude.list";
     public static final String USE_REDUCTION_BUFFER = "use.reduction.buffer";
+    public static final String FILTER_BASED_ON_BUSINESS = "filter.business";
 
     // todo add support for the ValueConverter contract
 
@@ -350,6 +351,16 @@ public class JdbcSinkConnectorConfig {
             .withDescription(
                     "A reduction buffer consolidates the execution of SQL statements by primary key to reduce the SQL load on the target database. When set to false (the default), each incoming event is applied as a logical SQL change. When set to true, incoming events that refer to the same row will be reduced to a single logical change based on the most recent row state.");
 
+    public static final Field FILTER_BASED_ON_BUSINESS_FIELD = Field.create(FILTER_BASED_ON_BUSINESS)
+            .withDisplayName("Specifies whether to filter based on business id")
+            .withType(Type.INT)
+            .withGroup(Field.createGroupEntry(Field.Group.FILTERS, 1))
+            .withWidth(ConfigDef.Width.SHORT)
+            .withImportance(ConfigDef.Importance.MEDIUM)
+            .withDefault(-1)
+            .withDescription(
+                    "Specifies whether to filter based on business id. The business id is a unique identifier for the record, and it is used to determine whether the record should be included in the change event. If the business id is not present in the record, the record will be excluded from the change event.");
+
     protected static final ConfigDefinition CONFIG_DEFINITION = ConfigDefinition.editor()
             .connector(
                     CONNECTION_URL_FIELD,
@@ -378,7 +389,8 @@ public class JdbcSinkConnectorConfig {
                     SQLSERVER_IDENTITY_INSERT_FIELD,
                     BATCH_SIZE_FIELD,
                     FIELD_INCLUDE_LIST_FIELD,
-                    FIELD_EXCLUDE_LIST_FIELD)
+                    FIELD_EXCLUDE_LIST_FIELD,
+                    FILTER_BASED_ON_BUSINESS_FIELD)
             .create();
 
     /**
@@ -557,6 +569,7 @@ public class JdbcSinkConnectorConfig {
     private final boolean sqlServerIdentityInsert;
     private FieldNameFilter fieldsFilter;
     private String connectionPrivateKey;
+    private long filterBusiness;
 
     private final long batchSize;
 
@@ -581,6 +594,7 @@ public class JdbcSinkConnectorConfig {
         this.sqlServerIdentityInsert = config.getBoolean(SQLSERVER_IDENTITY_INSERT_FIELD);
         this.batchSize = config.getLong(BATCH_SIZE_FIELD);
         this.useReductionBuffer = config.getBoolean(USE_REDUCTION_BUFFER_FIELD);
+        this.filterBusiness = config.getInteger(FILTER_BASED_ON_BUSINESS_FIELD);
 
         String fieldExcludeList = config.getString(FIELD_EXCLUDE_LIST);
         String fieldIncludeList = config.getString(FIELD_INCLUDE_LIST);
@@ -657,6 +671,14 @@ public class JdbcSinkConnectorConfig {
 
     public boolean isUseReductionBuffer() {
         return useReductionBuffer;
+    }
+
+    public boolean isFilterBusiness() {
+        return filterBusiness > 0;
+    }
+
+    public long getFilterBusiness() {
+        return filterBusiness;
     }
 
     // public Set<String> getDataTypeMapping() {

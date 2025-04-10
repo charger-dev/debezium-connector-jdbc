@@ -68,6 +68,8 @@ public class RecordWriter {
     private final QueryBinderResolver queryBinderResolver;
     private final JdbcSinkConnectorConfig config;
     private final DatabaseDialect dialect;
+    private static final String COLUMN_BUSINESS_ID = "business_id";
+    private static final String COLUMN_CHARGER_BUSINESS_ID = "_charger_business_id";
 
     public RecordWriter(SessionFactory sessionFactory, QueryBinderResolver queryBinderResolver, JdbcSinkConnectorConfig config, DatabaseDialect dialect) {
         this.sessionFactory = sessionFactory;
@@ -155,7 +157,7 @@ public class RecordWriter {
 
                 for (String sql : sqlStatements) {
                     if (sql != null && !sql.trim().isEmpty()) {
-                        LOGGER.info("Executing SQL: {}", sql);
+                        LOGGER.debug("Executing SQL: {}", sql);
                         stmt.execute(sql.trim());
                     }
                 }
@@ -371,6 +373,7 @@ public class RecordWriter {
 
             for (SinkRecordDescriptor record : records) {
                 List<String> row = new ArrayList<>();
+                boolean skip_record = false;
 
                 final Struct keySource = record.getKeyStruct(config.getPrimaryKeyMode());
                 for (String fieldName : record.getKeyFieldNames()) {
@@ -383,7 +386,21 @@ public class RecordWriter {
                     Field field = source.schema().field(fieldName);
                     Schema schema = field.schema();
                     Object value = source.getWithoutDefault(fieldName);
+
+                    if (config.isFilterBusiness()
+                            && (fieldName.equalsIgnoreCase(COLUMN_BUSINESS_ID) || fieldName.equalsIgnoreCase(COLUMN_CHARGER_BUSINESS_ID))
+                            && value != null
+                            && Long.parseLong(value.toString()) != config.getFilterBusiness()) {
+                        LOGGER.debug("Skipping record with business_id {} and filter_business {}", value, config.getFilterBusiness());
+                        skip_record = true;
+                        break;
+                    }
+
                     row.add(value == null ? CSV_NULL_LABEL : formatForCsv(fieldName, value, schema));
+                }
+
+                if (skip_record) {
+                    continue;
                 }
 
                 row.add(Instant.now().toString());

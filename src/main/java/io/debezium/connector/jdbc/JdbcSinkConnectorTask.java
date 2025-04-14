@@ -195,14 +195,23 @@ public class JdbcSinkConnectorTask extends SinkTask {
 
         final long kafkaOffset = getOriginalKafkaOffset(record);
         final TopicPartition topicPartition = new TopicPartition(topicName, getOriginalKafkaPartition(record));
-        final OffsetAndMetadata offsetAndMetadata = new OffsetAndMetadata(kafkaOffset + 1L);
+        final long nextOffset = kafkaOffset + 1;
 
-        final OffsetAndMetadata existing = offsets.put(topicPartition, offsetAndMetadata);
-        if (existing == null) {
-            LOGGER.trace("Advanced topic {} to offset {}.", topicName, kafkaOffset);
+        final OffsetAndMetadata current = offsets.get(topicPartition);
+
+        if (current == null) {
+            offsets.put(topicPartition, new OffsetAndMetadata(nextOffset));
+            LOGGER.trace("Initial offset set for topic {} to {}", topicName, kafkaOffset);
+        }
+        else if (current.offset() == kafkaOffset) {
+            // Exactly the next record in order, safe to advance
+            offsets.put(topicPartition, new OffsetAndMetadata(nextOffset));
+            LOGGER.trace("Advanced topic {} to offset {}", topicName, kafkaOffset);
         }
         else {
-            LOGGER.trace("Updated topic {} from offset {} to {}.", topicName, existing.offset(), kafkaOffset);
+            throw new ConnectException(
+                    "Offsets for topic " + topicName + " are out of order. Expected offset: " + current.offset() +
+                            ", but got: " + kafkaOffset);
         }
     }
 

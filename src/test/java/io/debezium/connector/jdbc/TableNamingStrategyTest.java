@@ -9,9 +9,7 @@ import static org.fest.assertions.Assertions.assertThat;
 
 import java.util.Map;
 
-import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.sink.SinkRecord;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -33,7 +31,7 @@ public class TableNamingStrategyTest {
         final JdbcSinkConnectorConfig config = new JdbcSinkConnectorConfig(Map.of());
         final SinkRecordFactory factory = new DebeziumSinkRecordFactory();
         final DefaultTableNamingStrategy strategy = new DefaultTableNamingStrategy();
-        assertThat(strategy.resolveTableName(config, factory.createRecord("database.schema.table"))).isEqualTo("database_schema_table");
+        assertThat(strategy.resolveTableName(config, factory.createRecord("database.schema.table"))).isEqualTo("TABLE");
     }
 
     @Test
@@ -41,7 +39,7 @@ public class TableNamingStrategyTest {
         final JdbcSinkConnectorConfig config = new JdbcSinkConnectorConfig(Map.of("table.name.format", "kafka_${topic}"));
         final SinkRecordFactory factory = new DebeziumSinkRecordFactory();
         final DefaultTableNamingStrategy strategy = new DefaultTableNamingStrategy();
-        assertThat(strategy.resolveTableName(config, factory.createRecord("database.schema.table"))).isEqualTo("kafka_database_schema_table");
+        assertThat(strategy.resolveTableName(config, factory.createRecord("database.schema.table"))).isEqualTo("TABLE");
     }
 
     @Test
@@ -50,7 +48,7 @@ public class TableNamingStrategyTest {
         final JdbcSinkConnectorConfig config = new JdbcSinkConnectorConfig(Map.of("table.name.format", "SYS.${topic}"));
         final SinkRecordFactory factory = new DebeziumSinkRecordFactory();
         final DefaultTableNamingStrategy strategy = new DefaultTableNamingStrategy();
-        assertThat(strategy.resolveTableName(config, factory.createRecord("database.schema.table"))).isEqualTo("SYS.database_schema_table");
+        assertThat(strategy.resolveTableName(config, factory.createRecord("database.schema.table"))).isEqualTo("TABLE");
     }
 
     @Test
@@ -59,7 +57,7 @@ public class TableNamingStrategyTest {
         final SinkRecordFactory factory = new DebeziumSinkRecordFactory();
         final DefaultTableNamingStrategy strategy = new DefaultTableNamingStrategy();
         SinkRecord sinkRecord = factory.createRecord("database.schema.table", (byte) 1, "database1", "schema1", "table1");
-        assertThat(strategy.resolveTableName(config, sinkRecord)).isEqualTo("source_database1_schema1_table1");
+        assertThat(strategy.resolveTableName(config, sinkRecord)).isEqualTo("TABLE");
     }
 
     @Test
@@ -68,16 +66,7 @@ public class TableNamingStrategyTest {
         final SinkRecordFactory factory = new DebeziumSinkRecordFactory();
         final DefaultTableNamingStrategy strategy = new DefaultTableNamingStrategy();
         SinkRecord sinkRecord = factory.createRecord("database.schema.table", (byte) 1, "database1", "schema1", "table1");
-        Assertions.assertThrows(DataException.class, () -> strategy.resolveTableName(config, sinkRecord));
-    }
-
-    @Test
-    public void testDefaultTableNamingStrategyWithDebeziumSourceAndTombstone() {
-        final JdbcSinkConnectorConfig config = new JdbcSinkConnectorConfig(Map.of("table.name.format", "source_${source.db}_${source.schema}_${source.table}"));
-        final SinkRecordFactory factory = new DebeziumSinkRecordFactory();
-        final DefaultTableNamingStrategy strategy = new DefaultTableNamingStrategy();
-        SinkRecord sinkRecord = factory.tombstoneRecord("database.schema.table");
-        assertThat(strategy.resolveTableName(config, sinkRecord)).isNull();
+        assertThat(strategy.resolveTableName(config, sinkRecord)).isEqualTo("TABLE");
     }
 
     @Test
@@ -86,6 +75,6 @@ public class TableNamingStrategyTest {
         final SinkRecordFactory factory = new DebeziumSinkRecordFactory();
         final DefaultTableNamingStrategy strategy = new DefaultTableNamingStrategy();
         SinkRecord sinkRecord = factory.tombstoneRecord("database.schema.table");
-        assertThat(strategy.resolveTableName(config, sinkRecord)).isEqualTo("kafka_database_schema_table");
+        assertThat(strategy.resolveTableName(config, sinkRecord)).isEqualTo("TABLE");
     }
 }

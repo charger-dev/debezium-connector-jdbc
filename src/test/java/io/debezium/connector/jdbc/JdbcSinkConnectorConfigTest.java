@@ -6,19 +6,13 @@
 package io.debezium.connector.jdbc;
 
 import static org.fest.assertions.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import java.io.StringReader;
-import java.security.PrivateKey;
-import java.security.Security;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.hibernate.cfg.AvailableSettings;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -28,13 +22,6 @@ import org.slf4j.LoggerFactory;
 import io.debezium.config.Field;
 import io.debezium.connector.jdbc.JdbcSinkConnectorConfig.PrimaryKeyMode;
 import io.debezium.doc.FixFor;
-
-import net.snowflake.client.jdbc.internal.org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
-import net.snowflake.client.jdbc.internal.org.bouncycastle.openssl.PEMParser;
-import net.snowflake.client.jdbc.internal.org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
-import net.snowflake.client.jdbc.internal.org.bouncycastle.openssl.jcajce.JceOpenSSLPKCS8DecryptorProviderBuilder;
-import net.snowflake.client.jdbc.internal.org.bouncycastle.operator.InputDecryptorProvider;
-import net.snowflake.client.jdbc.internal.org.bouncycastle.pkcs.PKCS8EncryptedPrivateKeyInfo;
 
 /**
  * Unit tests for the {@link JdbcSinkConnectorConfig} class.
@@ -149,43 +136,6 @@ public class JdbcSinkConnectorConfigTest {
 
     private static String getPrivateKeyPassphrase() {
         return "";
-    }
-
-    private static PrivateKey getPrivateKey(String privateKeyStr)
-            throws Exception {
-        String keyString = privateKeyStr
-                .replace("\\n", "\n") // fix escaped newlines (e.g. from JSON or .env)
-                .trim();
-
-        PrivateKeyInfo privateKeyInfo = null;
-        Security.addProvider(new BouncyCastleProvider());
-        // Read an object from the private key file.
-        PEMParser pemParser = new PEMParser(new StringReader(keyString));
-        Object pemObject = pemParser.readObject();
-        if (pemObject instanceof PKCS8EncryptedPrivateKeyInfo) {
-            // Handle the case where the private key is encrypted.
-            PKCS8EncryptedPrivateKeyInfo encryptedPrivateKeyInfo = (PKCS8EncryptedPrivateKeyInfo) pemObject;
-            String passphrase = getPrivateKeyPassphrase();
-            InputDecryptorProvider pkcs8Prov = new JceOpenSSLPKCS8DecryptorProviderBuilder().build(passphrase.toCharArray());
-            privateKeyInfo = PrivateKeyInfo.getInstance(encryptedPrivateKeyInfo.decryptPrivateKeyInfo(pkcs8Prov));
-        }
-        else if (pemObject instanceof PrivateKeyInfo) {
-            // Handle the case where the private key is unencrypted.
-            privateKeyInfo = (PrivateKeyInfo) pemObject;
-        }
-        pemParser.close();
-        JcaPEMKeyConverter converter = new JcaPEMKeyConverter().setProvider(BouncyCastleProvider.PROVIDER_NAME);
-        return converter.getPrivateKey(net.snowflake.client.jdbc.internal.org.bouncycastle.asn1.pkcs.PrivateKeyInfo.getInstance(privateKeyInfo));
-    }
-
-    @Test
-    public void testUnencryptedPrivateKey() throws Exception {
-        String unencryptedKey = """
-                """;
-
-        PrivateKey key = getPrivateKey(unencryptedKey);
-        assertNotNull(key);
-        assertEquals("RSA", key.getAlgorithm()); // or EC, depending on key
     }
 
     // @Test

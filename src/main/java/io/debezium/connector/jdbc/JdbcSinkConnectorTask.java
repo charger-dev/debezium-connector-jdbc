@@ -37,6 +37,7 @@ public class JdbcSinkConnectorTask extends SinkTask {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JdbcSinkConnectorTask.class);
     private SessionFactory sessionFactory;
+    private ConnectionManager connectionManager;
 
     private enum State {
         RUNNING,
@@ -72,11 +73,12 @@ public class JdbcSinkConnectorTask extends SinkTask {
             config.validate();
 
             sessionFactory = config.getHibernateConfiguration().buildSessionFactory();
+            connectionManager = new ConnectionManager(sessionFactory);
             DatabaseDialect databaseDialect = DatabaseDialectResolver.resolve(config, sessionFactory);
             QueryBinderResolver queryBinderResolver = new QueryBinderResolver();
-            RecordWriter recordWriter = new RecordWriter(sessionFactory, queryBinderResolver, config, databaseDialect);
+            RecordWriter recordWriter = new RecordWriter(connectionManager, queryBinderResolver, config, databaseDialect);
 
-            changeEventSink = new JdbcChangeEventSink(config, sessionFactory, databaseDialect, recordWriter);
+            changeEventSink = new JdbcChangeEventSink(config, connectionManager, databaseDialect, recordWriter);
         }
         finally {
             stateLock.unlock();
@@ -156,12 +158,8 @@ public class JdbcSinkConnectorTask extends SinkTask {
                 try {
                     changeEventSink.close();
 
-                    if (sessionFactory != null && sessionFactory.isOpen()) {
-                        LOGGER.info("Closing the session factory");
-                        sessionFactory.close();
-                    }
-                    else {
-                        LOGGER.info("Session factory already closed");
+                    if (connectionManager != null) {
+                        connectionManager.closeSessionFactory();
                     }
                 }
                 catch (Exception e) {

@@ -37,7 +37,6 @@ import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.hibernate.SessionFactory;
 import org.hibernate.StatelessSession;
 import org.hibernate.Transaction;
 import org.hibernate.jdbc.Work;
@@ -64,41 +63,22 @@ import net.snowflake.client.jdbc.internal.org.bouncycastle.pkcs.PKCS8EncryptedPr
 public class RecordWriter {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RecordWriter.class);
-    private final SessionFactory sessionFactory;
+    private final ConnectionManager connectionManager;
     private final QueryBinderResolver queryBinderResolver;
     private final JdbcSinkConnectorConfig config;
     private final DatabaseDialect dialect;
     private static final String COLUMN_BUSINESS_ID = "business_id";
     private static final String COLUMN_CHARGER_BUSINESS_ID = "_charger_business_id";
 
-    public RecordWriter(SessionFactory sessionFactory, QueryBinderResolver queryBinderResolver, JdbcSinkConnectorConfig config, DatabaseDialect dialect) {
-        this.sessionFactory = sessionFactory;
+    public RecordWriter(ConnectionManager connectionManager, QueryBinderResolver queryBinderResolver, JdbcSinkConnectorConfig config, DatabaseDialect dialect) {
+        this.connectionManager = connectionManager;
         this.queryBinderResolver = queryBinderResolver;
         this.config = config;
         this.dialect = dialect;
     }
 
     private StatelessSession openSessionWithRetry() {
-        final int maxRetries = 5;
-        final long retryDelayMillis = 2000;
-
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                return sessionFactory.openStatelessSession();
-            }
-            catch (Exception e) {
-                LOGGER.error("Failed to open StatelessSession, attempt {} of {}", attempt, maxRetries, e);
-
-                try {
-                    Thread.sleep(retryDelayMillis);
-                }
-                catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        }
-
-        throw new RuntimeException("Failed to open StatelessSession after retries.");
+        return connectionManager.openStatelessSession();
     }
 
     private String getPrivateKeyPassphrase() {
@@ -139,40 +119,89 @@ public class RecordWriter {
         String privateKeyStr = config.getConnectionPrivateKey();
         String password = config.getConnectionPassword();
 
-        try {
-            Properties props = new Properties();
-            props.put("user", user);
+        final int maxRetries = 3;
+        final long retryDelayMillis = 2000;
 
-            if (privateKeyStr == null || privateKeyStr.isEmpty()) {
-                props.put("password", password);
-            }
-            else {
-                props.put("privateKey", getPrivateKey(privateKeyStr));
-            }
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                Properties props = new Properties();
+                props.put("user", user);
 
-            try (Connection conn = DriverManager.getConnection(jdbcUrl, props);
-                    Statement stmt = conn.createStatement()) {
-
-                conn.setAutoCommit(false);
-
-                for (String sql : sqlStatements) {
-                    if (sql != null && !sql.trim().isEmpty()) {
-                        LOGGER.debug("Executing SQL: {}", sql);
-                        stmt.execute(sql.trim());
-                    }
+                if (privateKeyStr == null || privateKeyStr.isEmpty()) {
+                    props.put("password", password);
+                }
+                else {
+                    props.put("privateKey", getPrivateKey(privateKeyStr));
                 }
 
-                conn.commit();
+                try (Connection conn = DriverManager.getConnection(jdbcUrl, props);
+                        Statement stmt = conn.createStatement()) {
 
+                    conn.setAutoCommit(false);
+
+                    for (String sql : sqlStatements) {
+                        if (sql != null && !sql.trim().isEmpty()) {
+                            LOGGER.debug("Executing SQL: {}", sql);
+                            stmt.execute(sql.trim());
+                        }
+                    }
+
+                    conn.commit();
+                    return; // Success, exit the retry loop
+                }
+                catch (Exception execErr) {
+                    String errorMessage = execErr.getMessage();
+                    boolean isAuthError = errorMessage != null &&
+                            (errorMessage.contains("Session no longer exists") ||
+                                    errorMessage.contains("authentication failed") ||
+                                    errorMessage.contains("login required"));
+
+                    if (isAuthError) {
+                        LOGGER.error("Snowflake authentication error detected during execution, attempt {} of {}: {}",
+                                attempt, maxRetries, errorMessage);
+
+                        if (attempt == maxRetries) {
+                            LOGGER.error("Maximum authentication retry attempts reached during execution.");
+                            throw new RuntimeException("Snowflake authentication failed after maximum retry attempts", execErr);
+                        }
+                    }
+                    else {
+                        LOGGER.error("Execution failed, attempt {} of {}", attempt, maxRetries, execErr);
+
+                        if (attempt == maxRetries) {
+                            throw new RuntimeException("Failed to execute SQL statements via Snowflake after retries", execErr);
+                        }
+                    }
+
+                    try {
+                        // Exponential backoff for retries
+                        long delay = retryDelayMillis * (long) Math.pow(2, attempt - 1);
+                        Thread.sleep(delay);
+                    }
+                    catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Retry interrupted", ie);
+                    }
+                }
             }
-            catch (Exception execErr) {
-                LOGGER.error("Execution failed, attempting rollback", execErr);
-                throw new RuntimeException("Failed to execute SQL statements via Snowflake", execErr);
+            catch (Exception e) {
+                if (attempt == maxRetries) {
+                    LOGGER.error("Failed to connect to Snowflake after {} attempts", maxRetries, e);
+                    throw new RuntimeException("Failed to connect to Snowflake after retries", e);
+                }
+
+                LOGGER.error("Failed to connect to Snowflake, attempt {} of {}", attempt, maxRetries, e);
+
+                try {
+                    // Exponential backoff for retries
+                    long delay = retryDelayMillis * (long) Math.pow(2, attempt - 1);
+                    Thread.sleep(delay);
+                }
+                catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Retry interrupted", ie);
+                }
             }
-        }
-        catch (Exception e) {
-            LOGGER.error("Failed to connect to Snowflake", e);
-            throw new RuntimeException("Failed to connect to Snowflake", e);
         }
     }
 

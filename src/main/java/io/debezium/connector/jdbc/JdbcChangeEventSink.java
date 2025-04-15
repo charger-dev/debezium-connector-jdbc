@@ -26,7 +26,6 @@ import java.util.UUID;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.sink.SinkRecord;
-import org.hibernate.SessionFactory;
 import org.hibernate.StatelessSession;
 import org.hibernate.Transaction;
 import org.hibernate.dialect.DatabaseVersion;
@@ -55,42 +54,23 @@ public class JdbcChangeEventSink implements ChangeEventSink {
     public static final String DETECT_SCHEMA_CHANGE_RECORD_MSG = "Schema change records are not supported by JDBC connector. Adjust `topics` or `topics.regex` to exclude schema change topic.";
     private final JdbcSinkConnectorConfig config;
     private final DatabaseDialect dialect;
-    private final SessionFactory sessionFactory;
+    private final ConnectionManager connectionManager;
     private final TableNamingStrategy tableNamingStrategy;
     private final RecordWriter recordWriter;
 
-    public JdbcChangeEventSink(JdbcSinkConnectorConfig config, SessionFactory sessionFactory, DatabaseDialect dialect, RecordWriter recordWriter) {
+    public JdbcChangeEventSink(JdbcSinkConnectorConfig config, ConnectionManager connectionManager, DatabaseDialect dialect, RecordWriter recordWriter) {
 
         this.config = config;
         this.tableNamingStrategy = config.getTableNamingStrategy();
         this.dialect = dialect;
-        this.sessionFactory = sessionFactory;
+        this.connectionManager = connectionManager;
         this.recordWriter = recordWriter;
         final DatabaseVersion version = this.dialect.getVersion();
         LOGGER.info("Database version {}.{}.{}", version.getMajor(), version.getMinor(), version.getMicro());
     }
 
     private StatelessSession openSessionWithRetry() {
-        final int maxRetries = 5;
-        final long retryDelayMillis = 2000;
-
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                return sessionFactory.openStatelessSession();
-            }
-            catch (Exception e) {
-                LOGGER.error("Failed to open StatelessSession, attempt {} of {}", attempt, maxRetries, e);
-
-                try {
-                    Thread.sleep(retryDelayMillis);
-                }
-                catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        }
-
-        throw new RuntimeException("Failed to open StatelessSession after retries.");
+        return connectionManager.openStatelessSession();
     }
 
     @Override

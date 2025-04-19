@@ -712,6 +712,20 @@ public class JdbcSinkConnectorConfig {
         org.hibernate.cfg.Configuration hibernateConfig = new org.hibernate.cfg.Configuration();
 
         String url = config.getString(CONNECTION_URL_FIELD);
+
+        // Add client_session_keep_alive=true for Snowflake URLs to prevent reauthentication errors
+        if (url.toLowerCase().contains("snowflake")) {
+            String keepAliveParam = "client_session_keep_alive=true";
+            if (url.contains("?")) {
+                if (!url.contains(keepAliveParam)) {
+                    url += "&" + keepAliveParam;
+                }
+            }
+            else {
+                url += "?" + keepAliveParam;
+            }
+        }
+
         if (config.hasKey(CONNECTION_PRIVATE_KEY_FIELD)) {
             String privateKeyContent = config.getString(CONNECTION_PRIVATE_KEY_FIELD);
             String privateKeyPath = PRIVATE_KEY_PATH + UUID.randomUUID();

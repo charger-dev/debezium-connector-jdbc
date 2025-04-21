@@ -7,7 +7,7 @@ package io.debezium.connector.jdbc;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -30,8 +30,8 @@ class RecordWriterTest {
     static class TestRecordWriter extends RecordWriter {
         private boolean executeAllWithRawJdbcCalled = false;
 
-        public TestRecordWriter(ConnectionManager connectionManager, QueryBinderResolver queryBinderResolver,
-                                JdbcSinkConnectorConfig config, DatabaseDialect dialect) {
+        TestRecordWriter(ConnectionManager connectionManager, QueryBinderResolver queryBinderResolver,
+                         JdbcSinkConnectorConfig config, DatabaseDialect dialect) {
             super(connectionManager, queryBinderResolver, config, dialect);
         }
 

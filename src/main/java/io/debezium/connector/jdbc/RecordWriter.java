@@ -207,10 +207,15 @@ public class RecordWriter {
 
     public void writeCSV(List<SinkRecordDescriptor> records, List<String> sqlStatements, String csvFilePath) throws IOException {
         Stopwatch writeStopwatch = Stopwatch.reusable();
-        writeRecordsToCsv(records, csvFilePath);
+        int numRecords = writeRecordsToCsv(records, csvFilePath);
         writeStopwatch.start();
 
-        executeAllWithRawJdbc(sqlStatements);
+        if (numRecords == 0) {
+            LOGGER.debug("Skipping executeAllWithRawJdbc as there are no records in the CSV file");
+        }
+        else {
+            executeAllWithRawJdbc(sqlStatements);
+        }
 
         writeStopwatch.stop();
         LOGGER.trace("[PERF] Total write execution time {}", writeStopwatch.durations());
@@ -376,9 +381,10 @@ public class RecordWriter {
         return value.toString();
     }
 
-    public File writeRecordsToCsv(List<SinkRecordDescriptor> records, String csvFilePath) throws IOException {
+    public Integer writeRecordsToCsv(List<SinkRecordDescriptor> records, String csvFilePath) throws IOException {
         File tempFile;
         tempFile = new File(csvFilePath);
+        int numRecords = 0;
 
         if (!tempFile.exists()) {
             tempFile.getParentFile().mkdirs(); // Ensure the parent directories exist
@@ -387,7 +393,7 @@ public class RecordWriter {
 
         try (CSVWriter writer = new CSVWriter(new FileWriter(tempFile))) {
             if (records.isEmpty()) {
-                return tempFile;
+                return 0;
             }
 
             SinkRecordDescriptor last = records.get(records.size() - 1);
@@ -434,15 +440,15 @@ public class RecordWriter {
 
                 row.add(Instant.now().toString());
                 row.add(UUID.randomUUID().toString());
-
                 writer.writeNext(row.toArray(new String[0]));
+                numRecords++;
             }
         }
         catch (IOException e) {
             throw new RuntimeException("Failed to write CSV file", e);
         }
 
-        return tempFile;
+        return numRecords;
     }
 
     private Work processBatch(List<SinkRecordDescriptor> records, String sqlStatement) {

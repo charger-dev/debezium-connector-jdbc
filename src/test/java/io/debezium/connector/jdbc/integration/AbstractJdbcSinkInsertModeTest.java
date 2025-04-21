@@ -100,8 +100,9 @@ public abstract class AbstractJdbcSinkInsertModeTest extends AbstractJdbcSinkTes
         SinkRecordDescriptor sinkRecordDescriptor = new SinkRecordDescriptor(createRecord, topicName, List.of("id1", "id2"), List.of("name"), null, false);
         List<SinkRecordDescriptor> recordList = new ArrayList<SinkRecordDescriptor>();
         recordList.add(sinkRecordDescriptor);
-        File csvFile = recordWriter.writeRecordsToCsv(recordList, "/tmp/test.csv");
-        List<String> lines = Files.readAllLines(csvFile.toPath());
+        int numRecords = recordWriter.writeRecordsToCsv(recordList, "/tmp/test.csv");
+        assertThat(numRecords).isEqualTo(1);
+        List<String> lines = Files.readAllLines(new File("/tmp/test.csv").toPath());
 
         assertFalse(lines.isEmpty(), "CSV file should not be empty");
 

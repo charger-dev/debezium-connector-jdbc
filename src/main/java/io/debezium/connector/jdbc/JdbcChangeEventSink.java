@@ -22,6 +22,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.DataException;
@@ -57,6 +58,10 @@ public class JdbcChangeEventSink implements ChangeEventSink {
     private final ConnectionManager connectionManager;
     private final TableNamingStrategy tableNamingStrategy;
     private final RecordWriter recordWriter;
+
+    // Cache for record descriptors to detect schema changes
+    private final Map<TableId, SinkRecordDescriptor> previousRecordDescriptors = new ConcurrentHashMap<>();
+    private final Map<TableId, TableDescriptor> tableDescriptorCache = new ConcurrentHashMap<>();
 
     public JdbcChangeEventSink(JdbcSinkConnectorConfig config, ConnectionManager connectionManager, DatabaseDialect dialect, RecordWriter recordWriter) {
 
@@ -117,7 +122,7 @@ public class JdbcChangeEventSink implements ChangeEventSink {
                 flushBuffers(deleteBufferByTable);
 
                 try {
-                    final TableDescriptor table = checkAndApplyTableChangesIfNeeded(tableId, sinkRecordDescriptor);
+                    final TableDescriptor table = checkAndApplyTableChangesIfNeeded(tableId, sinkRecordDescriptor, true);
                     writeTruncate(dialect.getTruncateStatement(table));
                 }
                 catch (SQLException e) {
@@ -136,28 +141,28 @@ public class JdbcChangeEventSink implements ChangeEventSink {
                     // When an delete arrives, update buffer must be flushed to avoid losing an
                     // delete for the same record after its update.
                     LOGGER.info("Flushing update buffer for table {} because a delete arrived", tableId.getTableName());
-                    flushBuffer(tableId, updateBufferByTable.get(tableId).flush());
+                    flushBuffer(tableId, updateBufferByTable.get(tableId).flush(), false);
                 }
 
                 Buffer tableIdBuffer = resolveBuffer(deleteBufferByTable, tableId, sinkRecordDescriptor);
 
                 List<SinkRecordDescriptor> toFlush = tableIdBuffer.add(sinkRecordDescriptor);
 
-                flushBuffer(tableId, toFlush);
+                flushBuffer(tableId, toFlush, false);
             }
             else {
                 if (deleteBufferByTable.get(tableId) != null && !deleteBufferByTable.get(tableId).isEmpty()) {
                     // When an insert arrives, delete buffer must be flushed to avoid losing an insert for the same record after its deletion.
                     // this because at the end we will always flush inserts before deletes.
 
-                    flushBuffer(tableId, deleteBufferByTable.get(tableId).flush());
+                    flushBuffer(tableId, deleteBufferByTable.get(tableId).flush(), false);
                 }
 
                 if (prevColumnCountByTable.containsKey(tableId) && !Objects.equals(prevColumnCountByTable.get(tableId), sinkRecordDescriptor.getColumnNumber())) {
                     // If the column count is different, we need to flush the buffer to address schema evolution
                     LOGGER.info("Column count changed for table {}. Flushing buffer.",
                             tableId.getTableName() + " " + sinkRecordDescriptor.getColumnNumber() + " " + prevColumnCountByTable.get(tableId));
-                    flushBuffer(tableId, updateBufferByTable.get(tableId).flush());
+                    flushBuffer(tableId, updateBufferByTable.get(tableId).flush(), true);
                 }
 
                 Stopwatch updateBufferStopwatch = Stopwatch.reusable();
@@ -169,7 +174,7 @@ public class JdbcChangeEventSink implements ChangeEventSink {
                 updateBufferStopwatch.stop();
 
                 LOGGER.trace("[PERF] Update buffer execution time {}", updateBufferStopwatch.durations());
-                flushBuffer(tableId, toFlush);
+                flushBuffer(tableId, toFlush, false);
             }
 
             prevColumnCountByTable.put(tableId, sinkRecordDescriptor.getColumnNumber());
@@ -222,20 +227,30 @@ public class JdbcChangeEventSink implements ChangeEventSink {
 
     private void flushBuffers(Map<TableId, Buffer> bufferByTable) {
 
-        bufferByTable.forEach((tableId, recordBuffer) -> flushBuffer(tableId, recordBuffer.flush()));
+        bufferByTable.forEach((tableId, recordBuffer) -> flushBuffer(tableId, recordBuffer.flush(), false));
     }
 
-    private void flushBuffer(TableId tableId, List<SinkRecordDescriptor> toFlush) {
+    private void flushBuffer(TableId tableId, List<SinkRecordDescriptor> toFlush, boolean schemaChanged) {
+        if (toFlush.isEmpty()) {
+            return;
+        }
+
+        final int maxRetries = 1;
+        final long retryDelayMs = 1000;
 
         Stopwatch flushBufferStopwatch = Stopwatch.reusable();
         Stopwatch tableChangesStopwatch = Stopwatch.reusable();
-        if (!toFlush.isEmpty()) {
-            int bulkSize = toFlush.size();
-            LOGGER.info("Flushing records in JDBC Writer for table {} with size {}", tableId.getTableName(), bulkSize);
+        int bulkSize = toFlush.size();
+
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
             try {
+                LOGGER.info("Flushing records in JDBC Writer for table {} with size {}{}",
+                        tableId.getTableName(), bulkSize,
+                        attempt > 0 ? " (retry attempt " + attempt + ")" : "");
+
                 SinkRecordDescriptor record_0 = toFlush.get(0);
                 tableChangesStopwatch.start();
-                final TableDescriptor table = checkAndApplyTableChangesIfNeeded(tableId, toFlush.get(0));
+                final TableDescriptor table = checkAndApplyTableChangesIfNeeded(tableId, toFlush.get(0), schemaChanged);
                 tableChangesStopwatch.stop();
 
                 flushBufferStopwatch.start();
@@ -273,9 +288,26 @@ public class JdbcChangeEventSink implements ChangeEventSink {
 
                 LOGGER.trace("[PERF] Flush buffer execution time {}", flushBufferStopwatch.durations());
                 LOGGER.trace("[PERF] Table changes execution time {}", tableChangesStopwatch.durations());
+
+                return;
             }
             catch (Exception e) {
-                throw new ConnectException("Failed to process a sink record", e);
+                invalidateTableCache(tableId);
+
+                if (attempt >= maxRetries) {
+                    throw new ConnectException("Failed to process a sink record after " + (attempt + 1) + " attempts", e);
+                }
+
+                LOGGER.warn("Error flushing records for table {}, will retry in {} ms: {}",
+                        tableId.getTableName(), retryDelayMs, e.getMessage());
+
+                try {
+                    Thread.sleep(retryDelayMs);
+                }
+                catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new ConnectException("Interrupted while waiting to retry flush operation", ie);
+                }
             }
         }
     }
@@ -292,9 +324,72 @@ public class JdbcChangeEventSink implements ChangeEventSink {
 
     @Override
     public void close() {
+        // Clear caches
+        previousRecordDescriptors.clear();
+        tableDescriptorCache.clear();
     }
 
-    private TableDescriptor checkAndApplyTableChangesIfNeeded(TableId tableId, SinkRecordDescriptor descriptor) throws SQLException {
+    private void invalidateTableCache(TableId tableId) {
+        previousRecordDescriptors.remove(tableId);
+        tableDescriptorCache.remove(tableId);
+    }
+
+    private TableDescriptor checkAndApplyTableChangesIfNeeded(TableId tableId, SinkRecordDescriptor descriptor, boolean schemaChanged) throws SQLException {
+        SinkRecordDescriptor previousDescriptor = previousRecordDescriptors.get(tableId);
+        TableDescriptor cachedTableDescriptor = tableDescriptorCache.get(tableId);
+
+        if (!schemaChanged) {
+            if (previousDescriptor == null) {
+                // First time seeing this table, we need to check/create it
+                schemaChanged = true;
+                LOGGER.debug("First record for table '{}', checking schema", tableId.toFullIdentiferString());
+            }
+            else if (cachedTableDescriptor == null) {
+                // We have a previous descriptor but no table descriptor, need to check
+                schemaChanged = true;
+                LOGGER.debug("No cached table descriptor for '{}', checking schema", tableId.toFullIdentiferString());
+            }
+            else {
+                // Check if field count or names have changed
+                if (!Objects.equals(descriptor.getColumnNumber(), previousDescriptor.getColumnNumber())) {
+                    schemaChanged = true;
+                }
+                else {
+                    // Compare the current descriptor with the previous one
+                    Map<String, SinkRecordDescriptor.FieldDescriptor> currentFields = descriptor.getFields();
+                    Map<String, SinkRecordDescriptor.FieldDescriptor> previousFields = previousDescriptor.getFields();
+
+                    // Check if any field names or types have changed
+                    for (Map.Entry<String, SinkRecordDescriptor.FieldDescriptor> entry : currentFields.entrySet()) {
+                        String fieldName = entry.getKey();
+                        SinkRecordDescriptor.FieldDescriptor fieldDescriptor = entry.getValue();
+
+                        if (!previousFields.containsKey(fieldName) ||
+                                !Objects.equals(previousFields.get(fieldName).getType(), fieldDescriptor.getType()) ||
+                                !Objects.equals(previousFields.get(fieldName).getSchema().type(), fieldDescriptor.getSchema().type())) {
+                            schemaChanged = true;
+                            LOGGER.debug("Field '{}' changed or added in table '{}'",
+                                    fieldName, tableId.toFullIdentiferString());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // If no schema change detected, return the cached table descriptor
+        if (!schemaChanged && cachedTableDescriptor != null) {
+            LOGGER.debug("No schema change detected for table '{}', using cached descriptor",
+                    tableId.toFullIdentiferString());
+            // Update the previous descriptor to the current one
+            previousRecordDescriptors.put(tableId, descriptor);
+            return cachedTableDescriptor;
+        }
+
+        // Schema change detected or first time seeing this table, proceed with normal table check/creation logic
+        LOGGER.debug("Schema change detected or first record for table '{}', checking database schema",
+                tableId.toFullIdentiferString());
+
         try {
             createSchema(tableId.getCatalogName());
         }
@@ -302,16 +397,17 @@ public class JdbcChangeEventSink implements ChangeEventSink {
             LOGGER.info("Schema '{}' already exists.", tableId.getCatalogName());
         }
 
+        TableDescriptor result;
         if (!hasTable(tableId)) {
             // Table does not exist, lets attempt to create it.
             try {
-                return createTable(tableId, descriptor);
+                result = createTable(tableId, descriptor);
             }
             catch (SQLException ce) {
                 // It's possible the table may have been created in the interim, so try to alter.
                 LOGGER.warn("Table creation failed for '{}', attempting to alter the table", tableId.toFullIdentiferString(), ce);
                 try {
-                    return alterTableIfNeeded(tableId, descriptor);
+                    result = alterTableIfNeeded(tableId, descriptor);
                 }
                 catch (SQLException ae) {
                     // The alter failed, hard stop.
@@ -323,13 +419,18 @@ public class JdbcChangeEventSink implements ChangeEventSink {
         else {
             // Table exists, lets attempt to alter it if necessary.
             try {
-                return alterTableIfNeeded(tableId, descriptor);
+                result = alterTableIfNeeded(tableId, descriptor);
             }
             catch (SQLException ae) {
                 LOGGER.error("Failed to alter the table '{}'.", tableId.toFullIdentiferString(), ae);
                 throw ae;
             }
         }
+
+        previousRecordDescriptors.put(tableId, descriptor);
+        tableDescriptorCache.put(tableId, result);
+
+        return result;
     }
 
     private boolean hasTable(TableId tableId) {

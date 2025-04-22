@@ -108,8 +108,6 @@ public class GeneralDatabaseDialect implements DatabaseDialect {
         this.jdbcTimeZone = !Strings.isNullOrEmpty(jdbcTimeZone);
 
         registerTypes();
-
-        LOGGER.info("Database TimeZone: {}", getDatabaseTimeZone(sessionFactory));
     }
 
     @Override

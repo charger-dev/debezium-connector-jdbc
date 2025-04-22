@@ -134,6 +134,7 @@ public class RecordWriter {
                     props.put("privateKey", getPrivateKey(privateKeyStr));
                 }
 
+                props.put("autoCommit", "false");
                 try (Connection conn = DriverManager.getConnection(jdbcUrl, props);
                         Statement stmt = conn.createStatement()) {
 

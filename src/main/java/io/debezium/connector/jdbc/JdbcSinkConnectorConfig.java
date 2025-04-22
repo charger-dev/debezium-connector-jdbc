@@ -759,6 +759,8 @@ public class JdbcSinkConnectorConfig {
         hibernateConfig.setProperty(AvailableSettings.C3P0_MIN_SIZE, config.getString(CONNECTION_POOL_MIN_SIZE_FIELD));
         hibernateConfig.setProperty(AvailableSettings.C3P0_MAX_SIZE, config.getString(CONNECTION_POOL_MAX_SIZE_FIELD));
         hibernateConfig.setProperty(AvailableSettings.C3P0_ACQUIRE_INCREMENT, config.getString(CONNECTION_POOL_ACQUIRE_INCREMENT_FIELD));
+        hibernateConfig.setProperty("hibernate.c3p0.autoCommit", "true");
+        hibernateConfig.setProperty("hibernate.connection.autocommit", "true");
         hibernateConfig.setProperty(AvailableSettings.GLOBALLY_QUOTED_IDENTIFIERS, Boolean.toString(config.getBoolean(QUOTE_IDENTIFIERS_FIELD)));
         hibernateConfig.setProperty(AvailableSettings.JDBC_TIME_ZONE, getDatabaseTimeZone());
         hibernateConfig.setProperty(AvailableSettings.DRIVER, "net.snowflake.client.jdbc.SnowflakeDriver");

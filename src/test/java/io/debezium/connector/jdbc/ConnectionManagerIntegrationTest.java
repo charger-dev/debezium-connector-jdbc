@@ -50,7 +50,7 @@ public class ConnectionManagerIntegrationTest {
         transaction = mock(Transaction.class);
 
         // Configure mocks
-        when(connectionManager.openStatelessSession()).thenReturn(session);
+        when(connectionManager.getStatelessSession()).thenReturn(session);
         when(session.beginTransaction()).thenReturn(transaction);
 
         // Configure config mock
@@ -73,8 +73,8 @@ public class ConnectionManagerIntegrationTest {
         recordWriter.write(descriptors, sqlStatement, false);
 
         // Assert
-        // Verify that ConnectionManager.openStatelessSession was called
-        verify(connectionManager, times(1)).openStatelessSession();
+        // Verify that ConnectionManager.getStatelessSession was called
+        verify(connectionManager, times(1)).getStatelessSession();
         // Verify that session.beginTransaction was called
         verify(session, times(1)).beginTransaction();
         // Verify that transaction.commit was called
@@ -93,7 +93,7 @@ public class ConnectionManagerIntegrationTest {
 
         // Assert - no exception should be thrown
         // Session should still be opened even for empty records in this implementation
-        verify(connectionManager, times(1)).openStatelessSession();
+        verify(connectionManager, times(1)).getStatelessSession();
     }
 
     @Test

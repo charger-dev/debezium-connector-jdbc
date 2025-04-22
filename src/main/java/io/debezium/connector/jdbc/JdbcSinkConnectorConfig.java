@@ -136,7 +136,7 @@ public class JdbcSinkConnectorConfig {
     public static final Field CONNECTION_POOL_MIN_SIZE_FIELD = Field.create(CONNECTION_POOL_MIN_SIZE)
             .withDisplayName("Connection pool minimum size")
             .withType(Type.INT)
-            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 4))
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 6))
             .withWidth(ConfigDef.Width.SHORT)
             .withImportance(ConfigDef.Importance.LOW)
             .withDefault(5)
@@ -145,7 +145,7 @@ public class JdbcSinkConnectorConfig {
     public static final Field CONNECTION_POOL_MAX_SIZE_FIELD = Field.create(CONNECTION_POOL_MAX_SIZE)
             .withDisplayName("Connection pool maximum size")
             .withType(Type.INT)
-            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 5))
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 7))
             .withWidth(ConfigDef.Width.SHORT)
             .withImportance(ConfigDef.Importance.LOW)
             .withDefault(32)
@@ -154,7 +154,7 @@ public class JdbcSinkConnectorConfig {
     public static final Field CONNECTION_POOL_ACQUIRE_INCREMENT_FIELD = Field.create(CONNECTION_POOL_ACQUIRE_INCREMENT)
             .withDisplayName("Connection pool acquire increment")
             .withType(Type.INT)
-            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 6))
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 8))
             .withWidth(ConfigDef.Width.SHORT)
             .withImportance(ConfigDef.Importance.LOW)
             .withDefault(32)
@@ -163,7 +163,7 @@ public class JdbcSinkConnectorConfig {
     public static final Field CONNECTION_POOL_TIMEOUT_FIELD = Field.create(CONNECTION_POOL_TIMEOUT)
             .withDisplayName("Connection pool timeout")
             .withType(Type.LONG)
-            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 7))
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 9))
             .withWidth(ConfigDef.Width.SHORT)
             .withImportance(ConfigDef.Importance.LOW)
             .withDefault(1800)
@@ -172,7 +172,7 @@ public class JdbcSinkConnectorConfig {
     public static final Field CONNECTION_PRIVATE_KEY_FIELD = Field.create(CONNECTION_PRIVATE_KEY)
             .withDisplayName("Private key")
             .withType(Type.STRING)
-            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 8))
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 10))
             .withWidth(ConfigDef.Width.LONG)
             .withImportance(ConfigDef.Importance.HIGH)
             .withDescription("Private key of the database user to be used when connecting to the connection.");
@@ -713,16 +713,25 @@ public class JdbcSinkConnectorConfig {
 
         String url = config.getString(CONNECTION_URL_FIELD);
 
-        // Add client_session_keep_alive=true for Snowflake URLs to prevent reauthentication errors
+        // Add parameters for Snowflake URLs to prevent reauthentication errors and set auto-commit off
         if (url.toLowerCase().contains("snowflake")) {
             String keepAliveParam = "client_session_keep_alive=true";
+            String autoCommitParam = "autocommit=false";
+            String autoCommitBehaviorParam = "JDBC_AUTOCOMMIT_BEHAVIOR=PRESERVE";
+
             if (url.contains("?")) {
                 if (!url.contains(keepAliveParam)) {
                     url += "&" + keepAliveParam;
                 }
+                if (!url.contains(autoCommitParam)) {
+                    url += "&" + autoCommitParam;
+                }
+                if (!url.contains(autoCommitBehaviorParam)) {
+                    url += "&" + autoCommitBehaviorParam;
+                }
             }
             else {
-                url += "?" + keepAliveParam;
+                url += "?" + keepAliveParam + "&" + autoCommitParam + "&" + autoCommitBehaviorParam;
             }
         }
 

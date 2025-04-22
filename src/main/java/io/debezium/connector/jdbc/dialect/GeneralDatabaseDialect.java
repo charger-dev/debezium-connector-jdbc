@@ -16,7 +16,6 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAccessor;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -156,73 +155,7 @@ public class GeneralDatabaseDialect implements DatabaseDialect {
 
     @Override
     public TableDescriptor readTable(Connection connection, TableId tableId) throws SQLException {
-        if (isIdentifierUppercaseWhenNotQuoted() && !getConfig().isQuoteIdentifiers()) {
-            tableId = tableId.toUpperCase();
-        }
-        final TableDescriptor.Builder table = TableDescriptor.builder();
-
-        final DatabaseMetaData metadata = connection.getMetaData();
-        try (ResultSet rs = metadata.getTables(tableId.getCatalogName(), tableId.getSchemaName(), tableId.getTableName(), null)) {
-            if (rs.next()) {
-                table.catalogName(rs.getString(1));
-                table.schemaName(rs.getString(2));
-                table.tableName(tableId.getTableName());
-
-                final String tableType = rs.getString(4);
-                table.type(Strings.isNullOrBlank(tableType) ? "TABLE" : tableType);
-            }
-            else {
-                throw new IllegalStateException("Failed to find table: " + tableId.toFullIdentiferString());
-            }
-        }
-
-        final List<String> primaryKeyColumNames = new ArrayList<>();
-        try (ResultSet rs = metadata.getPrimaryKeys(tableId.getCatalogName(), tableId.getSchemaName(), tableId.getTableName())) {
-            while (rs.next()) {
-                final String columnName = rs.getString(4);
-                primaryKeyColumNames.add(columnName);
-                table.keyColumn(columnName);
-            }
-        }
-
-        try (ResultSet rs = metadata.getColumns(tableId.getCatalogName(), tableId.getSchemaName(), tableId.getTableName(), null)) {
-            final int resultSizeColumnSize = rs.getMetaData().getColumnCount();
-            while (rs.next()) {
-                final String catalogName = rs.getString(1);
-                final String schemaName = rs.getString(2);
-                final String columnTableName = rs.getString(3);
-                final String columnName = rs.getString(4);
-                final int jdbcType = rs.getInt(5);
-                final String typeName = rs.getString(6);
-                final int precision = rs.getInt(7);
-                final int scale = rs.getInt(9);
-                final int nullable = rs.getInt(11);
-
-                String autoIncrement = "no";
-                if (resultSizeColumnSize >= 23) {
-                    // Not all drivers include all columns, so we're checking before reading
-                    final String autoIncrementValue = rs.getString(23);
-                    if (!Strings.isNullOrBlank(autoIncrementValue)) {
-                        autoIncrement = autoIncrementValue;
-                    }
-                }
-
-                final ColumnDescriptor column = ColumnDescriptor.builder()
-                        .columnName(columnName)
-                        .jdbcType(jdbcType)
-                        .typeName(typeName)
-                        .precision(precision)
-                        .scale(scale)
-                        .nullable(isColumnNullable(columnName, primaryKeyColumNames, nullable))
-                        .autoIncrement("yes".equalsIgnoreCase(autoIncrement))
-                        .primarykey(primaryKeyColumNames.contains(columnName))
-                        .build();
-
-                table.column(column);
-            }
-        }
-
-        return table.build();
+        throw new UnsupportedOperationException("Reading table metadata is not supported for this dialect");
     }
 
     @Override

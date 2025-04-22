@@ -75,7 +75,7 @@ public class JdbcChangeEventSink implements ChangeEventSink {
     }
 
     private StatelessSession openSessionWithRetry() {
-        return connectionManager.getStatelessSession();
+        return connectionManager.openStatelessSession();
     }
 
     @Override

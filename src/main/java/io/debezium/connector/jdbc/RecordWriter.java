@@ -78,7 +78,7 @@ public class RecordWriter {
     }
 
     private StatelessSession openSessionWithRetry() {
-        return connectionManager.getStatelessSession();
+        return connectionManager.openStatelessSession();
     }
 
     private String getPrivateKeyPassphrase() {

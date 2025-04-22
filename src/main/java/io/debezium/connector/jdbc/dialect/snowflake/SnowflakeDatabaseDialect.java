@@ -111,15 +111,9 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
     public boolean tableExists(Connection connection, TableId tableId) throws SQLException {
         tableId = tableId.toUpperCase();
         final DatabaseMetaData metadata = connection.getMetaData();
-
-        String escapedDbName = escapeUnderscores(getDatabaseName());
         String escapedSchemaName = escapeUnderscores(getSchemaName());
-        String escapedTableName = escapeUnderscores(tableId.getTableName().toUpperCase());
 
-        LOGGER.debug("Checking if table exists with escaped names: database={}, schema={}, table={}",
-                escapedDbName, escapedSchemaName, escapedTableName);
-
-        try (ResultSet rs = metadata.getTables(escapedDbName, escapedSchemaName, escapedTableName, null)) {
+        try (ResultSet rs = metadata.getTables(getDatabaseName(), escapedSchemaName, tableId.getTableName().toUpperCase(), null)) {
             return rs.next();
         }
     }
@@ -128,16 +122,11 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
     public TableDescriptor readTable(Connection connection, TableId tableId) throws SQLException {
         tableId = tableId.toUpperCase();
         final TableDescriptor.Builder table = TableDescriptor.builder();
-
-        String escapedDbName = escapeUnderscores(getDatabaseName());
         String escapedSchemaName = escapeUnderscores(getSchemaName());
         String escapedTableName = escapeUnderscores(tableId.getTableName().toUpperCase());
 
-        LOGGER.debug("Reading table with escaped names: database={}, schema={}, table={}",
-                escapedDbName, escapedSchemaName, escapedTableName);
-
         final DatabaseMetaData metadata = connection.getMetaData();
-        try (ResultSet rs = metadata.getTables(escapedDbName, escapedSchemaName, escapedTableName, null)) {
+        try (ResultSet rs = metadata.getTables(getDatabaseName(), escapedSchemaName, tableId.getTableName().toUpperCase(), null)) {
             if (rs.next()) {
                 table.catalogName(rs.getString(1));
                 table.schemaName(rs.getString(2));
@@ -151,7 +140,7 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
             }
         }
 
-        try (ResultSet rs = metadata.getColumns(escapedDbName, escapedSchemaName, escapedTableName, "%")) {
+        try (ResultSet rs = metadata.getColumns(getDatabaseName(), escapedSchemaName, escapedTableName, "%")) {
             while (rs.next()) {
                 final String columnName = rs.getString(4);
                 final int jdbcType = rs.getInt(5);

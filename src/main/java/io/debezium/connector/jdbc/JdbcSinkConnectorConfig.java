@@ -78,6 +78,7 @@ public class JdbcSinkConnectorConfig {
     public static final String FIELD_EXCLUDE_LIST = "field.exclude.list";
     public static final String USE_REDUCTION_BUFFER = "use.reduction.buffer";
     public static final String FILTER_BASED_ON_BUSINESS = "filter.business";
+    public static final String KAFKA_BOOTSTRAP_SERVERS = "kafka.bootstrap.servers";
 
     // todo add support for the ValueConverter contract
 
@@ -361,6 +362,15 @@ public class JdbcSinkConnectorConfig {
             .withDescription(
                     "Specifies whether to filter based on business id. The business id is a unique identifier for the record, and it is used to determine whether the record should be included in the change event. If the business id is not present in the record, the record will be excluded from the change event.");
 
+    public static final Field KAFKA_BOOTSTRAP_SERVERS_FIELD = Field.create(KAFKA_BOOTSTRAP_SERVERS)
+            .withDisplayName("Kafka Bootstrap Servers")
+            .withType(Type.STRING)
+            .withGroup(Field.createGroupEntry(Field.Group.CONNECTOR_ADVANCED, 5))
+            .withWidth(ConfigDef.Width.LONG)
+            .withImportance(ConfigDef.Importance.MEDIUM)
+            .withDefault("kafka.dart-prod.svc.cluster.local:9092")
+            .withDescription("Comma-separated list of host and port pairs that are the addresses of the Kafka brokers used to check topic offsets.");
+
     protected static final ConfigDefinition CONFIG_DEFINITION = ConfigDefinition.editor()
             .connector(
                     CONNECTION_URL_FIELD,
@@ -390,7 +400,8 @@ public class JdbcSinkConnectorConfig {
                     BATCH_SIZE_FIELD,
                     FIELD_INCLUDE_LIST_FIELD,
                     FIELD_EXCLUDE_LIST_FIELD,
-                    FILTER_BASED_ON_BUSINESS_FIELD)
+                    FILTER_BASED_ON_BUSINESS_FIELD,
+                    KAFKA_BOOTSTRAP_SERVERS_FIELD)
             .create();
 
     /**
@@ -702,6 +713,10 @@ public class JdbcSinkConnectorConfig {
 
     public String getPostgresPostgisSchema() {
         return postgresPostgisSchema;
+    }
+
+    public String getKafkaBootstrapServers() {
+        return config.getString(KAFKA_BOOTSTRAP_SERVERS_FIELD);
     }
 
     /** makes {@link org.hibernate.cfg.Configuration} from connector config

@@ -345,7 +345,7 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
     @Override
     public List<String> getCSVUpsertStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath, List<String> keyFieldNames,
-                                               List<String> nonKeyFieldNames) {
+                                               List<String> nonKeyFieldNames, boolean performDeduplication) {
         String dbName = getDatabaseName();
         String tableName = getQualifiedTableName(table.getId());
         String fileName = csvFilePath.substring(csvFilePath.lastIndexOf("/") + 1);
@@ -373,23 +373,30 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
 
         sb.append(String.format("REMOVE @%s/%s;\n", CSV_STAGE_NAME, fileName));
 
-        sb.append(String.format(
-                "DELETE FROM \"%s\".%s\n" +
-                        "WHERE \"%s\" IN (\n" +
-                        "    SELECT \"%s\" FROM (\n" +
-                        "        SELECT \"%s\",\n" +
-                        "               ROW_NUMBER() OVER (PARTITION BY %s\n" +
-                        "                                ORDER BY \"%s\" DESC NULLS LAST, \"%s\" DESC) AS row_number\n" +
-                        "        FROM \"%s\".%s\n" +
-                        "    ) WHERE row_number != 1\n" +
-                        ");\n",
-                dbName, tableName,
-                COLUMN_CHARGER_RAW_ID,
-                COLUMN_CHARGER_RAW_ID,
-                COLUMN_CHARGER_RAW_ID,
-                partitionByClause,
-                COLUMN_CHARGER_EXTRACTED_AT, COLUMN_CHARGER_RAW_ID,
-                dbName, tableName));
+        if (performDeduplication) {
+            LOGGER.info("Performing deduplication as this is the last batch for topic {}", record.getTopicName());
+            sb.append(String.format(
+                    "DELETE FROM \"%s\".%s\n" +
+                            "WHERE \"%s\" IN (\n" +
+                            "    SELECT \"%s\" FROM (\n" +
+                            "        SELECT \"%s\",\n" +
+                            "               ROW_NUMBER() OVER (PARTITION BY %s\n" +
+                            "                                ORDER BY \"%s\" DESC NULLS LAST, \"%s\" DESC) AS row_number\n" +
+                            "        FROM \"%s\".%s\n" +
+                            "    ) WHERE row_number != 1\n" +
+                            ");\n",
+                    dbName, tableName,
+                    COLUMN_CHARGER_RAW_ID,
+                    COLUMN_CHARGER_RAW_ID,
+                    COLUMN_CHARGER_RAW_ID,
+                    partitionByClause,
+                    COLUMN_CHARGER_EXTRACTED_AT, COLUMN_CHARGER_RAW_ID,
+                    dbName, tableName));
+        }
+        else {
+            LOGGER.debug("Skipping deduplication for topic {} as performDeduplication={}",
+                    record.getTopicName(), performDeduplication);
+        }
 
         sb.append("COMMIT;\n");
 

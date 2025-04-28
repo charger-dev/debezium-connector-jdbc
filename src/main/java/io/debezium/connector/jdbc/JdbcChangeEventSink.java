@@ -257,7 +257,7 @@ public class JdbcChangeEventSink implements ChangeEventSink {
 
                 if (config.getInsertMode() == CSV) {
                     String csvFilePath = "/tmp/" + UUID.randomUUID() + ".csv";
-                    List<String> updateStatement = getSqlStatements(table, toFlush.get(toFlush.size() - 1), csvFilePath);
+                    List<String> updateStatement = getSqlStatements(table, toFlush.get(toFlush.size() - 1), csvFilePath, bulkSize);
                     try {
                         recordWriter.writeCSV(toFlush, updateStatement, csvFilePath);
                     }
@@ -528,7 +528,7 @@ public class JdbcChangeEventSink implements ChangeEventSink {
         return readTable(tableId);
     }
 
-    private List<String> getSqlStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath) {
+    private List<String> getSqlStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath, int bulkSize) {
         if (config.getInsertMode() != CSV) {
             throw new DataException("Cannot get SQL statements for non-CSV mode");
         }
@@ -537,9 +537,11 @@ public class JdbcChangeEventSink implements ChangeEventSink {
             return dialect.getCSVDeleteStatements(table, record, csvFilePath, record.getKeyFieldNames());
         }
         else {
-            return dialect.getCSVUpsertStatements(table, record, csvFilePath, record.getKeyFieldNames(), record.getNonKeyFieldNames());
-        }
+            boolean performDeduplication = io.debezium.connector.jdbc.util.KafkaUtils.willConsumeAllRemainingRecords(
+                    record, config.getKafkaBootstrapServers(), bulkSize);
 
+            return dialect.getCSVUpsertStatements(table, record, csvFilePath, record.getKeyFieldNames(), record.getNonKeyFieldNames(), performDeduplication);
+        }
     }
 
     private String getSqlStatement(TableDescriptor table, SinkRecordDescriptor record, Boolean isDelete, int bulkSize) {

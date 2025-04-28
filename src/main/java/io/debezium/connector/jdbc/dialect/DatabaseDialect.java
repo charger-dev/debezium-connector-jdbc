@@ -163,10 +163,13 @@ public interface DatabaseDialect {
      *
      * @param table the current relational table model, should not be {@code null}
      * @param record the current sink record being processed, should not be {@code null}
+     * @param csvFilePath the path to the CSV file
+     * @param keyFieldNames the list of key field names
+     * @param nonKeyFieldNames the list of non-key field names
      * @return the upsert SQL statement to be executed, never {@code null}
      */
     List<String> getCSVUpsertStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath, List<String> keyFieldNames,
-                                        List<String> nonKeyFieldNames);
+                                        List<String> nonKeyFieldNames, boolean performDeduplication);
 
     /**
      * Construct a {@code UPDATE} statement specific for this dialect.

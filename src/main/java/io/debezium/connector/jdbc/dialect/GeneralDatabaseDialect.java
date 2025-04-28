@@ -307,7 +307,7 @@ public class GeneralDatabaseDialect implements DatabaseDialect {
 
     @Override
     public List<String> getCSVUpsertStatements(TableDescriptor table, SinkRecordDescriptor record, String csvFilePath, List<String> keyFieldNames,
-                                               List<String> nonKeyFieldNames) {
+                                               List<String> nonKeyFieldNames, boolean performDeduplication) {
         throw new UnsupportedOperationException("Upsert configurations are not supported for this dialect");
     }
 

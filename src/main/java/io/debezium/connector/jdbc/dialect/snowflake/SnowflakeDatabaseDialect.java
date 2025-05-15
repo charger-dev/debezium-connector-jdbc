@@ -66,6 +66,14 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
     private static final String COLUMN_CHARGER_EXTRACTED_AT = "_CHARGER_EXTRACTED_AT";
     private static final Map<TableId, DatabaseMetaData> tableMetadataCache = new ConcurrentHashMap<>();
 
+    private static final Set<String> SNOWFLAKE_RESERVED_KEYWORDS = Set.of(
+            "account", "all", "alter", "and", "as", "between", "by", "case", "cast", "check", "column",
+            "connect", "constraint", "create", "cross", "current", "delete", "distinct", "drop", "else",
+            "exists", "for", "from", "full", "grant", "group", "having", "in", "insert", "intersect",
+            "into", "is", "join", "like", "natural", "not", "null", "of", "on", "or", "order", "primary",
+            "references", "select", "set", "table", "then", "to", "union", "unique", "update", "using",
+            "values", "when", "where", "with");
+
     public static class SnowflakeDatabaseDialectProvider implements DatabaseDialectProvider {
         @Override
         public boolean supports(Dialect dialect) {
@@ -586,7 +594,7 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
         builder.appendList(", ", missingFields, (name) -> {
             final SinkRecordDescriptor.FieldDescriptor field = record.getFields().get(name);
             final StringBuilder columnSpec = new StringBuilder();
-            columnSpec.append(toIdentifier(columnNamingStrategy.resolveColumnName(field.getColumnName())));
+            columnSpec.append(toSafeIdentifier(toIdentifier(columnNamingStrategy.resolveColumnName(field.getColumnName()))));
             columnSpec.append(" ").append(field.getTypeName());
             columnSpec.append(getAlterTableColumnSuffix());
             return columnSpec.toString();
@@ -595,5 +603,14 @@ public class SnowflakeDatabaseDialect extends GeneralDatabaseDialect {
         builder.append(")");
         builder.append(getAlterTableSuffix());
         return builder.build();
+    }
+
+    private String toSafeIdentifier(String identifier) {
+        if (identifier == null || identifier.isEmpty()) {
+            throw new IllegalArgumentException("Column name cannot be null or empty");
+        }
+
+        boolean needsQuoting = !identifier.matches("^[A-Z_][A-Z0-9_]*$") || SNOWFLAKE_RESERVED_KEYWORDS.contains(identifier.toLowerCase());
+        return needsQuoting ? "\"" + identifier.toUpperCase() + "\"" : identifier;
     }
 }
